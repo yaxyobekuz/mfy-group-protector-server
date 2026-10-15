@@ -184,7 +184,7 @@ model User {
   /// ⚠️ Login butun tizim bo'ylab YAGONA. Bu study-tracker'dagi
   /// `platform.user_directory` ning soddalashtirilgan ko'rinishi: baza
   /// bitta bo'lgani uchun alohida reyestr kerak emas, `@unique` yetarli.
-  username String @unique
+  username     String @unique
   /// ⚠️ ARGON2ID HASH. Bcrypt emas: argon2id — hozirgi tavsiya (OWASP)
   /// va bcrypt'ning 72-bayt kesilishi muammosi yo'q.
   passwordHash String @map("password_hash")
@@ -231,6 +231,7 @@ model User {
   district District? @relation(fields: [districtId], references: [id], onDelete: SetNull)
 
   officialGroups   TelegramGroup[] @relation("GroupOfficialBy")
+  guardedGroups    TelegramGroup[] @relation("GroupGuardBy")
   attachedSignals  GroupSignal[]   @relation("SignalAttachedBy")
   dismissedSignals GroupSignal[]   @relation("SignalDismissedBy")
   authoredIssues   Issue[]         @relation("IssueAuthor")
@@ -361,11 +362,11 @@ model TelegramGroup {
   guardAt      DateTime? @map("guard_at")
   guardBy      String?   @map("guard_by")
 
-  mahalla      Mahalla?       @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
-  officialUser User?          @relation("GroupOfficialBy", fields: [officialBy], references: [id], onDelete: SetNull)
-  guardUser    User?          @relation("GroupGuardBy", fields: [guardBy], references: [id], onDelete: SetNull)
-  messages     GroupMessage[]
-  signals      GroupSignal[]
+  mahalla        Mahalla?        @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
+  officialUser   User?           @relation("GroupOfficialBy", fields: [officialBy], references: [id], onDelete: SetNull)
+  guardUser      User?           @relation("GroupGuardBy", fields: [guardBy], references: [id], onDelete: SetNull)
+  messages       GroupMessage[]
+  signals        GroupSignal[]
   securityEvents SecurityEvent[]
 
   @@index([isOfficial, status])
@@ -388,7 +389,7 @@ model TelegramGroup {
 model GroupMessage {
   id String @id @default(cuid())
 
-  chatId String @map("chat_id")
+  chatId    String @map("chat_id")
   /// Telegram `message_id` — havola shundan quriladi.
   messageId String @map("message_id")
 
@@ -467,7 +468,7 @@ enum SignalStatus {
 model GroupSignal {
   id String @id @default(cuid())
 
-  chatId String @map("chat_id")
+  chatId    String  @map("chat_id")
   /// ⚠️ `String?`: xabar o'chirilgan bo'lsa ham signal qoladi, faqat
   /// havolasi bo'lmaydi.
   messageId String? @map("message_id")
@@ -475,7 +476,7 @@ model GroupSignal {
   kind     SignalKind
   severity SignalSeverity @default(normal)
   /// Xabarning O'Z matni (kesilgan bo'lishi mumkin).
-  summary String
+  summary  String
 
   /// ── MANBA (muhrlangan) ──────────────────────────────────────────
   senderTgId String?   @map("sender_tg_id")
@@ -565,7 +566,7 @@ enum IssuePriority {
 model IssueCategory {
   id String @id @default(cuid())
 
-  name String @unique
+  name  String  @unique
   /// Panelda rang bilan ajratish uchun (hex).
   color String?
 
@@ -745,9 +746,29 @@ model Settings {
   ///
   /// Yuqori jiddiylikdagi signal chiqsa — shu chatlarga xabar. Bo'sh
   /// massiv = o'chirilgan.
-  alertChatIds String[] @default([]) @map("alert_chat_ids")
+  alertChatIds     String[]       @default([]) @map("alert_chat_ids")
   /// Qaysi darajadan boshlab xabar ketadi.
   alertMinSeverity SignalSeverity @default(high) @map("alert_min_severity")
+
+  /// ── XAVFSIZLIK QALQONI ──────────────────────────────────────────
+  ///
+  /// ⚠️ BU YERDA FAQAT "NIMANI ZARARLI DEYISH" sozlanadi, qalqon
+  /// YOQILISHI esa har guruhda alohida (`TelegramGroup.guardEnabled`).
+  /// Bitta global tugma bilan hamma guruhda o'chirish boshlanishi
+  /// mumkin emas — o'chirish qaytarib bo'lmaydigan amal.
+  guardDeleteFiles Boolean @default(true) @map("guard_delete_files")
+  guardDeleteUrls  Boolean @default(true) @map("guard_delete_urls")
+
+  /// ⚠️ QORA RO'YXAT SOZLAMADA, KODDA EMAS: yangi firibgar domen
+  /// har kuni paydo bo'ladi va uni qo'shish uchun deploy kutib
+  /// bo'lmaydi. Model nomidan farqli o'laroq, bu ro'yxat xulosa
+  /// SIFATIGA ta'sir qilmaydi — faqat qamroviga.
+  guardBlockedHosts String[] @default([]) @map("guard_blocked_hosts")
+
+  /// ⚠️ OQ RO'YXAT QORA RO'YXATDAN USTUN: rasmiy domenlar
+  /// (`gov.uz`, `t.me`) hech qachon o'chirilmasligi kerak — MFY
+  /// xodimi rasmiy havola tashlasa, bot uni yo'q qilib qo'ymasin.
+  guardAllowedHosts String[] @default([]) @map("guard_allowed_hosts")
 
   updatedAt DateTime @updatedAt @map("updated_at")
   updatedBy String?  @map("updated_by")
@@ -764,9 +785,9 @@ model Settings {
 model AuditLog {
   id String @id @default(cuid())
 
-  userId String? @map("user_id")
+  userId   String? @map("user_id")
   /// "auth.login", "group.official", "signal.attach", "issue.resolve"
-  action String
+  action   String
   /// Qaysi obyekt ustida.
   entity   String?
   entityId String? @map("entity_id")
@@ -833,7 +854,7 @@ enum ThreatAction {
 model SecurityEvent {
   id String @id @default(cuid())
 
-  chatId String @map("chat_id")
+  chatId    String  @map("chat_id")
   /// ⚠️ `String?`: xabar o'chirilgach Telegram'da u yo'q, lekin
   /// raqami dalil sifatida qoladi.
   messageId String? @map("message_id")
@@ -845,23 +866,23 @@ model SecurityEvent {
   ///
   /// ⚠️ NUSXA OLINADI, jonli o'qilmaydi: odam guruhdan chiqib
   /// ketsa ham "kim tashlagani" hisobotda qolishi kerak.
-  senderTgId    String? @map("sender_tg_id")
-  senderName    String? @map("sender_name")
+  senderTgId     String? @map("sender_tg_id")
+  senderName     String? @map("sender_name")
   senderUsername String? @map("sender_username")
 
   /// ── FAYL HAQIDA ─────────────────────────────────────────────────
-  fileName String? @map("file_name")
+  fileName     String? @map("file_name")
   /// Telegram aytgan MIME turi — ISHONCHSIZ (yuboruvchi o'zgartira
   /// oladi), shuning uchun kengaytma ALOHIDA saqlanadi.
-  fileMime String? @map("file_mime")
-  fileSize Int?    @map("file_size")
+  fileMime     String? @map("file_mime")
+  fileSize     Int?    @map("file_size")
   /// Telegram `file_unique_id` — AYNI fayl boshqa guruhda ham
   /// tashlanganini topish uchun.
   fileUniqueId String? @map("file_unique_id")
 
   /// ── HAVOLA HAQIDA ───────────────────────────────────────────────
   /// Aniqlangan havola (to'liq).
-  url String?
+  url     String?
   /// Faqat domen — hisobotda guruhlash shu bo'yicha.
   urlHost String? @map("url_host")
 

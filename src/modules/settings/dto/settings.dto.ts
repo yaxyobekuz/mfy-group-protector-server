@@ -53,4 +53,35 @@ export class UpdateSettingsDto {
   alertChatIds?: string[];
 
   @IsOptional() @IsEnum(SignalSeverity) alertMinSeverity?: SignalSeverity;
+
+  // ── XAVFSIZLIK QALQONI ───────────────────────────────────────────
+
+  @IsOptional() @IsBoolean() guardDeleteFiles?: boolean;
+  @IsOptional() @IsBoolean() guardDeleteUrls?: boolean;
+
+  /**
+   * ⚠️ FAQAT DOMEN, HAVOLA EMAS: `https://evil.com/path` yozilsa u
+   * hech qachon mos kelmasdi (taqqoslash domen bo'yicha) va
+   * ma'muriyat "qo'shdim, lekin ishlamayapti" deb o'ylab qolardi.
+   *
+   * ⚠️ `ArrayMaxSize`: ro'yxat har xabarda tekshiriladi va uzun
+   * ro'yxat botni sekinlashtirardi.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @Matches(/^[a-z0-9.-]+\.[a-z]{2,}$/i, {
+    each: true,
+    message: "guardBlockedHosts faqat domen bo'lishi kerak (masalan: evil.com)",
+  })
+  guardBlockedHosts?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @Matches(/^[a-z0-9.-]+\.[a-z]{2,}$/i, {
+    each: true,
+    message: "guardAllowedHosts faqat domen bo'lishi kerak (masalan: gov.uz)",
+  })
+  guardAllowedHosts?: string[];
 }

@@ -164,6 +164,8 @@ Hamma yo'l `/api` prefiksi bilan. Standart holda **hammasi yopiq**
 | Guruhlar | `GET /groups`, `GET /groups/stats` | `groups.view` |
 | | `PATCH /groups/:chatId/official` | `groups.official` |
 | | `PATCH /groups/:chatId/mahalla` | `groups.assign` |
+| Xavfsizlik | `GET /security/events`, `/security/stats` | `security.view` |
+| | `PATCH /security/groups/:chatId/guard` | `security.guard` |
 | Signallar | `GET /signals`, `/signals/counts`, `/signals/status` | `signals.view` |
 | | `POST /signals/run` | `signals.run` |
 | | `PATCH /signals/:id/attach` | `signals.attach` |
@@ -193,6 +195,8 @@ Hamma yo'l `/api` prefiksi bilan. Standart holda **hammasi yopiq**
 | POST | `/bot/issues/link-check` | telegram bog'langanmi |
 | GET | `/bot/issues/categories` | faol kategoriyalar |
 | POST | `/bot/issues` | muammo yuborish |
+| GET | `/bot/security/config/:chatId` | qalqon sozlamasi + qora ro'yxat |
+| POST | `/bot/security/events` | tahdid aniqlandi/o'chirildi |
 
 ⚠️ Muallif **`telegramId` bo'yicha** topiladi, bot aytgan `userId`
 bo'yicha emas: kalit tarqalgan bo'lsa, istalgan xodim nomidan yozish

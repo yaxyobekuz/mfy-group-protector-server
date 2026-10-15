@@ -23,6 +23,7 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { UsersModule } from "./modules/users/users.module";
 import { TerritoryModule } from "./modules/territory/territory.module";
 import { GroupsModule } from "./modules/groups/groups.module";
+import { SecurityModule } from "./modules/security/security.module";
 import { SignalsModule } from "./modules/signals/signals.module";
 import { IssuesModule } from "./modules/issues/issues.module";
 import { ReportsModule } from "./modules/reports/reports.module";
@@ -39,6 +40,7 @@ import { AuditModule } from "./modules/audit/audit.module";
     UsersModule,
     TerritoryModule,
     GroupsModule,
+    SecurityModule,
     IssuesModule,
     SignalsModule,
     ReportsModule,

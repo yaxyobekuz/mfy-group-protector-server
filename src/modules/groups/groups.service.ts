@@ -263,6 +263,10 @@ export class GroupsService {
       isOfficial: group.isOfficial,
       officialAt: group.officialAt,
       officialBy: group.officialUser,
+      // ⚠️ `isOfficial` DAN ALOHIDA: qalqon — aholini himoya
+      // qilish, `isOfficial` — yozishmani o'qishga rozilik.
+      guardEnabled: group.guardEnabled,
+      guardAt: group.guardAt,
       mahalla: group.mahalla,
       joinedAt: group.joinedAt,
       leftAt: group.leftAt,
@@ -418,15 +422,19 @@ export class GroupsService {
       includeUnassigned: isProvinceWide(scope),
     });
 
-    const [total, official, unassigned, pendingMessages] = await Promise.all([
-      this.prisma.telegramGroup.count({ where: scopeWhere }),
-      this.prisma.telegramGroup.count({ where: { ...scopeWhere, isOfficial: true } }),
-      this.prisma.telegramGroup.count({ where: { ...scopeWhere, mahallaId: null } }),
-      this.prisma.groupMessage.count({
-        where: { analyzedAt: null, group: scopeWhere },
-      }),
-    ]);
+    const [total, official, unassigned, pendingMessages, guarded] =
+      await Promise.all([
+        this.prisma.telegramGroup.count({ where: scopeWhere }),
+        this.prisma.telegramGroup.count({ where: { ...scopeWhere, isOfficial: true } }),
+        this.prisma.telegramGroup.count({ where: { ...scopeWhere, mahallaId: null } }),
+        this.prisma.groupMessage.count({
+          where: { analyzedAt: null, group: scopeWhere },
+        }),
+        this.prisma.telegramGroup.count({
+          where: { ...scopeWhere, guardEnabled: true },
+        }),
+      ]);
 
-    return { total, official, unassigned, pendingMessages };
+    return { total, official, unassigned, pendingMessages, guarded };
   }
 }

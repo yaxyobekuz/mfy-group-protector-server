@@ -18,8 +18,21 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../../common/audit.service";
 import type { Settings } from "@prisma/client";
 import type { UpdateSettingsDto } from "./dto/settings.dto";
+import { normalizeHost } from "../security/threat-rules";
 
 const SINGLETON_ID = "singleton";
+
+/**
+ * Domen ro'yxatini normallashtiradi va takrorlarni olib tashlaydi.
+ *
+ * ⚠️ `normalizeHost` XAVFSIZLIK MODULIDAN olinadi — botdagi
+ * taqqoslash AYNI shu funksiya bilan ishlaydi. Bu yerda ikkinchi
+ * nusxa yozilsa, ikkisi ajralib ketib, panelda qo'shilgan domen
+ * botda mos kelmay qolardi.
+ */
+const normalizeHosts = (hosts: string[]): string[] => [
+  ...new Set(hosts.map(normalizeHost).filter(Boolean)),
+];
 
 @Injectable()
 export class SettingsService {
@@ -60,6 +73,26 @@ export class SettingsService {
         ...(dto.alertChatIds !== undefined ? { alertChatIds: dto.alertChatIds } : {}),
         ...(dto.alertMinSeverity !== undefined
           ? { alertMinSeverity: dto.alertMinSeverity }
+          : {}),
+
+        // ── XAVFSIZLIK QALQONI ──────────────────────────────────
+        ...(dto.guardDeleteFiles !== undefined
+          ? { guardDeleteFiles: dto.guardDeleteFiles }
+          : {}),
+        ...(dto.guardDeleteUrls !== undefined
+          ? { guardDeleteUrls: dto.guardDeleteUrls }
+          : {}),
+        /**
+         * ⚠️ DOMEN NORMALLASHTIRILADI (kichik harf, `www.` olib
+         * tashlanadi): panelda `WWW.Evil.COM` yozilsa, u
+         * botdagi taqqoslashda (`normalizeHost`) mos kelmay,
+         * bloklash JIMGINA ishlamay qolardi.
+         */
+        ...(dto.guardBlockedHosts !== undefined
+          ? { guardBlockedHosts: normalizeHosts(dto.guardBlockedHosts) }
+          : {}),
+        ...(dto.guardAllowedHosts !== undefined
+          ? { guardAllowedHosts: normalizeHosts(dto.guardAllowedHosts) }
           : {}),
         updatedBy: userId,
       },

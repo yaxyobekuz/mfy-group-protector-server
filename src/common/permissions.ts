@@ -1,10 +1,11 @@
 /**
  * RUXSAT KATALOGI — YAGONA MANBA.
  *
- * ⚠️ BU FAYL ADMIN PANELDAGI NUSXASI BILAN QO'LDA SINXRON:
- * `admin/src/shared/config/permissions.ts`. Bo'limni o'zgartirsangiz
- * IKKALASINI ham tahrirlang — aks holda panelda tugma ko'rinadi, lekin
- * server 403 qaytaradi (yoki teskarisi, bu xavfliroq).
+ * ⚠️ PANELDA NUSXA YO'Q va bo'lmasligi kerak: u katalogni
+ * `GET /users/permissions-catalog` orqali SHU FAYLDAN oladi. Nusxa
+ * yaratilsa, u qo'lda sinxronni talab qilardi va albatta eskirardi —
+ * panelda tugma ko'rinib, server 403 qaytarardi (yoki teskarisi, bu
+ * xavfliroq).
  *
  * ── QAMROV VA RUXSAT — IKKI ALOHIDA NARSA ────────────────────────────
  *
@@ -53,6 +54,18 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         key: "groups.assign",
         label: "MFY biriktirish",
         hint: "Hududiy kesim shundan chiqadi: noto'g'ri biriktirish butun hisobotni buzadi.",
+      },
+    ],
+  },
+  {
+    key: "security",
+    label: "Xavfsizlik",
+    items: [
+      { key: "security.view", label: "Xavfsizlik jurnalini ko'rish" },
+      {
+        key: "security.guard",
+        label: "Qalqonni yoqish/o'chirish",
+        hint: "Qalqon yoqilgan guruhda bot zararli fayl va havolalarni O'CHIRADI. Bu qaytarib bo'lmaydigan amal — o'chirilgan xabarni tiklab bo'lmaydi.",
       },
     ],
   },
@@ -141,6 +154,10 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
   operator: [
     "groups.view",
     "groups.assign",
+    // ⚠️ `security.guard` OPERATORDA YO'Q: qalqonni yoqish — botga
+    // aholining xabarini o'chirish huquqini berish va bu
+    // ma'muriyat qarori.
+    "security.view",
     "signals.view",
     "signals.attach",
     "signals.dismiss",
@@ -152,7 +169,14 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     "territory.view",
     "reports.view",
   ],
-  viewer: ["groups.view", "signals.view", "issues.view", "territory.view", "reports.view"],
+  viewer: [
+    "groups.view",
+    "security.view",
+    "signals.view",
+    "issues.view",
+    "territory.view",
+    "reports.view",
+  ],
 };
 
 /** Noma'lum kalitlarni ajratadi — xodim saqlashda tekshiriladi. */
