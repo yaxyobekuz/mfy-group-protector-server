@@ -1,0 +1,766 @@
+// ╔══════════════════════════════════════════════════════════════════════╗
+// ║  VILOYAT SHTABI — MFY guruhlaridagi muammolarni aniqlash tizimi      ║
+// ╚══════════════════════════════════════════════════════════════════════╝
+//
+// Tizimning mohiyati bir gapda: viloyatdagi MAHALLA (MFY) Telegram
+// guruhlarida aholi nima deb yozyapti — shundan ma'muriyat ko'rishi kerak
+// bo'lgan MUAMMOLARNI ajratib olish.
+//
+// ── OQIM ──────────────────────────────────────────────────────────────
+//
+//   MFY guruhi            bot KUZATUVCHI sifatida o'qiydi
+//        ↓                (hech narsa yozmaydi, javob bermaydi)
+//   group_messages        NAVBAT — tahlilsiz xom xabar
+//        ↓                AI (cron, har 30 daqiqada)
+//   group_signals         AI TAXMINI — "bu gap muammoga o'xshaydi"
+//        ↓                ODAM qarori (panelda kategoriya tanlaydi)
+//   issues                RASMIY MUROJAAT navbati
+//        ↓
+//   javob → botga qaytadi (muallif qo'lda yuborgan bo'lsa)
+//
+// ── ASOSIY DOKTRINALAR ────────────────────────────────────────────────
+//
+// ⚠️ 1. SIGNAL — MUAMMO EMAS. Bu butun tizimning eng muhim qarori.
+//    Xulosani AI chiqargan, ya'ni u xato bo'lishi mumkin: hazilni
+//    shikoyat deb, shikoyatni hazil deb topishi mumkin. `issues` esa
+//    ma'muriyat ISHONADIGAN rasmiy navbat — unga tekshirilmagan taxminni
+//    qo'yish o'sha ishonchni buzardi. Shuning uchun `GroupSignal` va
+//    `Issue` — IKKI ALOHIDA jadval va o'tish faqat ODAM qarori bilan
+//    bo'ladi (`signals.service.ts#attach`).
+//
+// ⚠️ 2. GURUH → MFY → TUMAN. Hududiy kesim guruhga SOZLAMALARDA
+//    biriktiriladi, Telegram'dan kelmaydi: guruh nomida "Chilonzor
+//    12-MFY" deb yozilgan bo'lishi mumkin, lekin unga ishonib hisobot
+//    qurish mumkin emas (nom o'zgaradi, xato yoziladi, umuman
+//    yozilmaydi). Shuning uchun `mahallaId` QO'LDA qo'yiladi va u NULL
+//    bo'lishi mumkin — "hali biriktirilmagan".
+//
+// ⚠️ 3. HUDUDIY KO'RINISH — XODIM DARAJASIDA. Viloyat shtabi xodimi
+//    hammasini ko'radi, tuman xodimi faqat o'z tumanini. Bu
+//    `User.scopeKind` + `User.districtId` bilan hal qilinadi va
+//    HAR SO'ROVDA server tomonida qo'llanadi (`scope.util.ts`) —
+//    frontendda emas.
+//
+// ⚠️ 4. BAZA BITTA VA TOZA. study-tracker'dagi multi-tenant (platform +
+//    br_<kod> schema'lari, AsyncLocalStorage Proxy) bu yerda YO'Q va
+//    kerak ham emas: viloyat shtabi — BITTA tashkilot. Hududiy ajratish
+//    ma'lumot darajasida (FK), ulanish darajasida emas.
+//
+// ── SANA VA VAQT ──────────────────────────────────────────────────────
+//
+// ⚠️ Butun tizim Asia/Tashkent (+5, DST yo'q). Barcha `DateTime` —
+//    haqiqiy INSTANT (UTC'da saqlanadi, Toshkent devor-soatida
+//    ko'rsatiladi). "UTC yarim tunidagi KUN" naqshi bu yerda YO'Q:
+//    kun aniqligidagi maydon umuman ishlatilmaydi, shuning uchun
+//    "sana bir kunga siljidi" klassik xatosi tug'ilmaydi ham.
+
+generator client {
+  provider = "prisma-client-js"
+
+  // ⚠️ `output` BERILMAYDI — client `node_modules/.prisma/client` ga
+  // chiqadi va `@prisma/client` orqali import qilinadi.
+  //
+  // `../src/generated/prisma` ga chiqarish vasvasasi bor (turlar
+  // ko'rinib turadi), lekin u ISHLAB CHIQARISHDA SINDIRADI:
+  // `tsconfig.build.json` `src/generated` ni chiqarib tashlaydi
+  // (u generatsiya qilingan kod, versiyalanmaydi), natijada
+  // `dist/` ichida client YO'Q bo'lib qoladi va server
+  // `MODULE_NOT_FOUND` bilan yiqiladi. Build esa muvaffaqiyatli
+  // o'tadi — xato faqat ishga tushirishda chiqadi.
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  HUDUD — tuman → MFY
+// ══════════════════════════════════════════════════════════════════════
+
+/// TUMAN (yoki shahar) — hududiy birlikning yuqori darajasi.
+///
+/// ⚠️ VILOYAT JADVALI YO'Q va bu ataylab: tizim BITTA viloyat uchun
+/// ishlaydi (nomi `Settings.orgName` da). Viloyatlar jadvali qo'shilsa,
+/// u darhol bo'sh ierarxiya qatlamiga aylanardi — har so'rovda `where`
+/// ga qo'shiladigan, lekin hech qachon birdan ortiq qatori bo'lmaydigan
+/// jadval.
+model District {
+  id String @id @default(cuid())
+
+  /// Qisqa kod — URL va import uchun ("chilonzor").
+  code String @unique
+  name String
+
+  /// Ro'yxatdagi tartib — alifbo emas, ma'muriy tartib ko'pincha boshqa.
+  sortOrder Int @default(0) @map("sort_order")
+
+  /// ⚠️ O'CHIRILMAYDI, ARXIVLANADI: tumanga biriktirilgan MFY, guruh,
+  /// signal va muammolar tarixi qoladi.
+  isArchived Boolean   @default(false) @map("is_archived")
+  archivedAt DateTime? @map("archived_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  mahallas Mahalla[]
+  users    User[]
+
+  @@index([isArchived, sortOrder])
+  @@map("districts")
+}
+
+/// MAHALLA (MFY) — hududiy birlikning quyi darajasi va tizimning asosiy
+/// kuzatuv obyekti.
+///
+/// ⚠️ BITTA MFY — BIR NECHTA GURUH bo'lishi mumkin (aholi guruhi,
+/// e'lonlar kanali, yoshlar guruhi). Shuning uchun bog'lanish
+/// `TelegramGroup.mahallaId` da, bu yerda emas.
+model Mahalla {
+  id String @id @default(cuid())
+
+  districtId String @map("district_id")
+
+  code String @unique
+  name String
+
+  /// Raisning ismi va telefoni — muammo bo'yicha kim bilan gaplashish
+  /// kerakligi panelda darhol ko'rinishi uchun.
+  chairmanName  String? @map("chairman_name")
+  chairmanPhone String? @map("chairman_phone")
+
+  /// Aholi soni — hisobotda "1000 aholiga nechta murojaat" kesimi uchun.
+  /// Majburiy emas: ko'pincha noma'lum va uni majburlash ma'lumot
+  /// kiritishni butunlay to'xtatib qo'yardi.
+  population Int?
+
+  sortOrder Int @default(0) @map("sort_order")
+
+  isArchived Boolean   @default(false) @map("is_archived")
+  archivedAt DateTime? @map("archived_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  district District        @relation(fields: [districtId], references: [id], onDelete: Restrict)
+  groups   TelegramGroup[]
+  issues   Issue[]
+
+  @@index([districtId, isArchived, sortOrder])
+  @@map("mahallas")
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  XODIMLAR VA RUXSAT
+// ══════════════════════════════════════════════════════════════════════
+
+/// Xodimning HUDUDIY ko'rinish darajasi.
+///
+/// ⚠️ BU RUXSAT EMAS, QAMROV. Ruxsat "nima qila oladi" (`permissions`),
+/// qamrov esa "kimning ma'lumotini ko'radi". Ikkisi ALOHIDA: tuman
+/// xodimi ham signalni muammoga biriktira oladi, lekin faqat o'z
+/// tumanidagi guruhdan chiqqanini.
+enum ScopeKind {
+  /// Butun viloyat — barcha tumanlar.
+  province
+  /// Faqat `User.districtId` dagi tuman.
+  district
+}
+
+enum UserRole {
+  /// Tizim egasi — hamma narsa, ruxsat tekshirilmaydi.
+  owner
+  /// Shtab ma'muriyati.
+  admin
+  /// Operator — signal ko'radi, muammo yuritadi.
+  operator
+  /// Faqat o'qiydi (hisobot uchun).
+  viewer
+}
+
+model User {
+  id String @id @default(cuid())
+
+  /// ⚠️ Login butun tizim bo'ylab YAGONA. Bu study-tracker'dagi
+  /// `platform.user_directory` ning soddalashtirilgan ko'rinishi: baza
+  /// bitta bo'lgani uchun alohida reyestr kerak emas, `@unique` yetarli.
+  username String @unique
+  /// ⚠️ ARGON2ID HASH. Bcrypt emas: argon2id — hozirgi tavsiya (OWASP)
+  /// va bcrypt'ning 72-bayt kesilishi muammosi yo'q.
+  passwordHash String @map("password_hash")
+
+  firstName String  @map("first_name")
+  lastName  String  @map("last_name")
+  phone     String?
+
+  role UserRole @default(operator)
+
+  /// ── QAMROV ──────────────────────────────────────────────────────
+  ///
+  /// ⚠️ `district` bo'lsa `districtId` MAJBURIY. Bazada buni ifodalash
+  /// mumkin emas (shartli NOT NULL), shuning uchun tekshiruv service'da
+  /// (`users.service.ts`). Qo'yilmasa xodim HECH NARSA ko'rmaydi —
+  /// ochib qo'yishdan ko'ra xavfsizroq.
+  scopeKind  ScopeKind @default(district) @map("scope_kind")
+  districtId String?   @map("district_id")
+
+  /// Ruxsatlar — `common/permissions.ts` dagi katalogdan olingan
+  /// satrlar ("groups.manage", "signals.attach", ...).
+  ///
+  /// ⚠️ MASSIV, ALOHIDA JADVAL EMAS. Ruxsatlar soni o'nlab va ular
+  /// FAQAT shu xodim bilan birga o'qiladi — join qiladigan narsa yo'q.
+  /// `owner` uchun bu massiv umuman o'qilmaydi.
+  permissions String[] @default([])
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isArchived Boolean   @default(false) @map("is_archived")
+  archivedAt DateTime? @map("archived_at")
+
+  /// Telegram bog'lanishi — xodim botdan muammo yuborishi uchun.
+  ///
+  /// ⚠️ BITTA TELEGRAM — BITTA XODIM (`@unique`). Aks holda bir
+  /// telegramdan kelgan muammo kim nomidan yozilganini aniqlash
+  /// mumkin bo'lmasdi.
+  telegramId String? @unique @map("telegram_id")
+
+  lastLoginAt DateTime? @map("last_login_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  district District? @relation(fields: [districtId], references: [id], onDelete: SetNull)
+
+  officialGroups   TelegramGroup[] @relation("GroupOfficialBy")
+  attachedSignals  GroupSignal[]   @relation("SignalAttachedBy")
+  dismissedSignals GroupSignal[]   @relation("SignalDismissedBy")
+  authoredIssues   Issue[]         @relation("IssueAuthor")
+  assignedIssues   Issue[]         @relation("IssueAssignee")
+  reviewedIssues   Issue[]         @relation("IssueReviewedBy")
+  issueComments    IssueComment[]
+  sessions         Session[]
+
+  @@index([role, isArchived])
+  @@index([districtId])
+  @@map("users")
+}
+
+/// REFRESH TOKEN SESSIYASI.
+///
+/// ⚠️ TOKEN O'ZI SAQLANMAYDI — faqat SHA-256 hash'i. Baza o'qib
+/// ketilsa, o'g'irlangan hash bilan kirish mumkin emas.
+///
+/// ⚠️ ROTATSIYA: har yangilanishda eski qator `revokedAt` oladi va
+/// YANGISI yoziladi. Bir refresh token IKKI MARTA ishlatilsa — bu
+/// o'g'irlanish belgisi va o'sha xodimning BARCHA sessiyalari yopiladi
+/// (`auth.service.ts#refresh`).
+model Session {
+  id String @id @default(cuid())
+
+  userId String @map("user_id")
+
+  tokenHash String @unique @map("token_hash")
+
+  userAgent String? @map("user_agent")
+  ip        String?
+
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  TELEGRAM GURUHLARI
+// ══════════════════════════════════════════════════════════════════════
+
+/// BOT KO'RGAN GURUH/KANAL — reyestr.
+///
+/// ── NIMA UCHUN REYESTR KERAK ──────────────────────────────────────
+///
+/// ⚠️ Telegram Bot API'da "men qaysi guruhlarda a'zoman" degan savolga
+/// javob beradigan metod YO'Q. `getChats` faqat MTProto'da, ya'ni bot
+/// emas, ODAM nomidan ulanishda mavjud. Bot faqat O'ZIGA kelgan
+/// hodisadan biladi, shuning uchun ro'yxatni biz to'playmiz:
+///
+///   my_chat_member   → botning holati o'zgardi (asosiy manba)
+///   guruhdagi xabar  → zaxira (hodisa o'tkazib yuborilgan bo'lsa)
+///
+/// ⚠️ O'TMISHGA QARAMAYDI: bot bu kod joylashtirilishidan OLDIN a'zo
+/// bo'lgan guruh ro'yxatga O'ZI tushmaydi — Telegram o'tgan
+/// hodisalarni qayta yubormaydi. Bunday guruh unda biror harakat
+/// bo'lgandan keyin tushadi (huquq o'zgarishi yoki oddiy xabar), shu
+/// sababli zaxira yo'l bor.
+model TelegramGroup {
+  /// ⚠️ `chatId` — PK va TABIIY kalit: Telegram beradi, biz generatsiya
+  /// qilmaymiz. `String`, `BigInt` emas — Telegram chat id'lari katta
+  /// manfiy sonlar va ular bilan arifmetika qilinmaydi.
+  chatId String @id @map("chat_id")
+
+  /// group | supergroup | channel. `private` BU YERGA TUSHMAYDI —
+  /// shaxsiy chat bu bog'lanish, guruh emas.
+  type  String @default("group")
+  title String
+
+  /// Ommaviy guruhda bor, yopiqda yo'q. Xabar havolasining SHAKLI
+  /// shunga bog'liq (`signals.service.ts#buildMessageLink`).
+  username String?
+
+  /// Telegram `ChatMember.status` — bot hali ichidami.
+  status String @default("member")
+
+  canPostMessages Boolean @default(false) @map("can_post_messages")
+  canInviteUsers  Boolean @default(false) @map("can_invite_users")
+
+  /// ── KUZATUVGA ROZILIK ───────────────────────────────────────────
+  ///
+  /// ⚠️ `isOfficial` — PANELDA qo'yiladigan belgi va bot unga HECH
+  /// QACHON tegmaydi. Ma'nosi: "bu guruh yozishmasini o'qishga
+  /// ruxsat". Reyestrda bot tasodifan qo'shilgan, test va umuman
+  /// begona guruhlar ham bor — ularning yozishmasini o'qish mumkin
+  /// emas. Belgi bo'lmasa xabar NAVBATGA HAM TUSHMAYDI
+  /// (`group-watch.service.ts`).
+  isOfficial Boolean   @default(false) @map("is_official")
+  officialAt DateTime? @map("official_at")
+  officialBy String?   @map("official_by")
+
+  /// ── HUDUDIY BIRIKTIRISH ─────────────────────────────────────────
+  ///
+  /// ⚠️ TELEGRAM'DAN KELMAYDI, QO'LDA QO'YILADI (schema boshidagi
+  /// 2-doktrina). `null` = "hali biriktirilmagan" va bu NORMAL holat:
+  /// bot yangi guruhga qo'shilganda shunday bo'ladi. Panelda bunday
+  /// guruhlar alohida ajratib ko'rsatiladi.
+  mahallaId String? @map("mahalla_id")
+
+  addedByTgId String? @map("added_by_tg_id")
+
+  joinedAt DateTime  @default(now()) @map("joined_at")
+  leftAt   DateTime? @map("left_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  mahalla      Mahalla?       @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
+  officialUser User?          @relation("GroupOfficialBy", fields: [officialBy], references: [id], onDelete: SetNull)
+  messages     GroupMessage[]
+  signals      GroupSignal[]
+
+  @@index([isOfficial, status])
+  @@index([mahallaId])
+  @@map("telegram_groups")
+}
+
+/// RASMIY GURUHDAN KELGAN XABAR — AI tahlili uchun XOMASHYO.
+///
+/// ⚠️ BU NAVBAT, ARXIV EMAS. Tahlildan keyin belgilanadi va 24 soatdan
+/// so'ng O'CHIRILADI (`signals.service.ts#sweep`). Sabab ikkita:
+/// (1) bu aholining shaxsiy yozishmasi va uni saqlab qolish kerak emas,
+/// (2) xato tekshirish uchun bir necha soat yetarli ("signal nimadan
+/// chiqdi?").
+///
+/// ⚠️ MATN BO'LMASA YOZILMAYDI. Stiker, rasm, ovozli xabar va xizmat
+/// xabarlari (kirdi/chiqdi) tahlilga hech narsa bermaydi, lekin
+/// navbatni va AI hisobini shishirardi. Rasm izohi (`caption`) esa
+/// matn — u olinadi.
+model GroupMessage {
+  id String @id @default(cuid())
+
+  chatId String @map("chat_id")
+  /// Telegram `message_id` — havola shundan quriladi.
+  messageId String @map("message_id")
+
+  senderTgId String? @map("sender_tg_id")
+  senderName String? @map("sender_name")
+
+  text String
+
+  /// Nimaga javob ekani. "Ha, menda ham shunday" degan xabar o'zicha
+  /// ma'nosiz, javob bo'lgani bilan ma'noli — model shuni ko'radi.
+  replyToText String? @map("reply_to_text")
+
+  sentAt DateTime @map("sent_at")
+
+  /// ⚠️ NULL = navbatda. AI yiqilsa bu ustun QO'YILMAYDI va xabar
+  /// keyingi aylanishda qayta ko'riladi — aks holda u tahlilsiz qolib
+  /// ketardi.
+  analyzedAt DateTime? @map("analyzed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  group TelegramGroup @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+
+  /// ⚠️ Bir xabar ikki marta kelishi mumkin (bot qayta ishga tushdi,
+  /// Telegram takrorladi). Unique bo'lmasa navbatda dublikat paydo
+  /// bo'lib, AI bir gapni ikki marta ko'rardi.
+  @@unique([chatId, messageId])
+  @@index([analyzedAt, sentAt])
+  @@map("group_messages")
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  SIGNALLAR — AI TAXMINI
+// ══════════════════════════════════════════════════════════════════════
+
+/// AI topgan toifa.
+enum SignalKind {
+  /// Shikoyat, norozilik, nosozlik haqida xabar.
+  complaint
+  /// Taklif, yaxshilash istagi.
+  suggestion
+  /// Javobsiz qolgan savol.
+  question
+}
+
+enum SignalSeverity {
+  low
+  normal
+  high
+}
+
+enum SignalStatus {
+  /// Hali ko'rilmagan.
+  new
+  /// Muammoga aylantirilgan.
+  attached
+  /// "Bu muammo emas".
+  dismissed
+}
+
+/// AI TOPGAN SIGNAL — "bu gap muammoga o'xshaydi".
+///
+/// ⚠️ SIGNAL — MUAMMO EMAS (schema boshidagi 1-doktrina). Bu jadval AI
+/// TAXMINLARI uchun, `Issue` esa ma'muriyat ishonadigan rasmiy navbat
+/// uchun.
+///
+/// ⚠️ MANBA XABARDAN KO'CHIRIB OLINADI, FK bilan bog'lanmaydi:
+/// `group_messages` 24 soatdan keyin o'chiriladi, signal esa qoladi.
+/// Shuning uchun `senderName`, `sentAt` va matn SHU YERGA muhrlanadi.
+///
+/// ⚠️ MATNNI AI YOZMAYDI. `summary` — XABARNING O'Z MATNI. AI faqat
+/// TANLAYDI (bu gap signalga arziydimi) va TOIFALAYDI. Sabab: AI yozgan
+/// xulosa har safar "...haqida shikoyat bor" degan o'ramga aylanib,
+/// odamning o'z gapini uzoqlashtiradi. Odam shikoyatni o'z so'zi bilan
+/// o'qiganda tezroq tushunadi.
+model GroupSignal {
+  id String @id @default(cuid())
+
+  chatId String @map("chat_id")
+  /// ⚠️ `String?`: xabar o'chirilgan bo'lsa ham signal qoladi, faqat
+  /// havolasi bo'lmaydi.
+  messageId String? @map("message_id")
+
+  kind     SignalKind
+  severity SignalSeverity @default(normal)
+  /// Xabarning O'Z matni (kesilgan bo'lishi mumkin).
+  summary String
+
+  /// ── MANBA (muhrlangan) ──────────────────────────────────────────
+  senderTgId String?   @map("sender_tg_id")
+  senderName String?   @map("sender_name")
+  sentAt     DateTime? @map("sent_at")
+
+  /// AI nechta xabarni ko'rib shu xulosaga kelgan — qamrov.
+  messageCount Int @default(1) @map("message_count")
+
+  /// Qaysi model chiqargan. Model almashganda eski signallarni ajratish
+  /// uchun ("bu xulosani qaysi versiya bergan").
+  model String?
+
+  status SignalStatus @default(new)
+
+  /// Biriktirilgan bo'lsa — qaysi muammoga.
+  ///
+  /// ⚠️ `@unique`: bir signal IKKI muammoga aylanmaydi. Bu
+  /// `attach()` dagi holat tekshiruvining baza darajasidagi kafolati —
+  /// ikki operator bir vaqtda bosgan holatda ham.
+  issueId    String?   @unique @map("issue_id")
+  attachedBy String?   @map("attached_by")
+  attachedAt DateTime? @map("attached_at")
+
+  /// ⚠️ E'tiborsiz qoldirilgan signal O'CHIRILMAYDI: AI nimani
+  /// noto'g'ri topganini ko'rish kerak (prompt shunga qarab
+  /// tuzatiladi). Ro'yxat standart holda faqat yangilarini ko'rsatadi,
+  /// ya'ni bu yozuvlar ishga xalaqit bermaydi.
+  dismissedBy     String?   @map("dismissed_by")
+  dismissedAt     DateTime? @map("dismissed_at")
+  dismissedReason String?   @map("dismissed_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  group         TelegramGroup @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+  issue         Issue?        @relation(fields: [issueId], references: [id], onDelete: SetNull)
+  attachedUser  User?         @relation("SignalAttachedBy", fields: [attachedBy], references: [id], onDelete: SetNull)
+  dismissedUser User?         @relation("SignalDismissedBy", fields: [dismissedBy], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([chatId, status])
+  @@index([severity, status])
+  @@map("group_signals")
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  MUAMMOLAR — RASMIY NAVBAT
+// ══════════════════════════════════════════════════════════════════════
+
+/// Muammo qayerdan keldi.
+///
+/// ⚠️ MANBA MUHRLANADI va o'zgarmaydi. Hisobotda "AI nechta muammo
+/// topdi, odam nechta yubordi" degan savolga javob shu ustundan chiqadi
+/// — AI'ning foydasini o'lchashning yagona yo'li.
+enum IssueSource {
+  /// AI signalidan biriktirilgan.
+  signal
+  /// Botdan qo'lda yuborilgan.
+  bot
+  /// Panelda qo'lda yaratilgan.
+  manual
+}
+
+enum IssueStatus {
+  /// Yangi — hech kim ko'rmagan.
+  new
+  /// Ko'rib chiqilmoqda.
+  in_progress
+  /// Hal qilindi.
+  resolved
+  /// Rad etildi (muammo emas / hududimizga tegishli emas).
+  rejected
+}
+
+enum IssuePriority {
+  low
+  normal
+  high
+  urgent
+}
+
+/// MUROJAAT KATEGORIYASI — panelda sozlanadi.
+///
+/// ⚠️ BOT YARATMAYDI, faqat FAOL bo'lganlarini ko'rsatadi. Kategoriya
+/// yo'q bo'lsa botdagi oqim BOSHLANMAYDI (`categoryId` majburiy).
+model IssueCategory {
+  id String @id @default(cuid())
+
+  name String @unique
+  /// Panelda rang bilan ajratish uchun (hex).
+  color String?
+
+  description String?
+
+  sortOrder Int @default(0) @map("sort_order")
+
+  /// ⚠️ YUMSHOQ O'CHIRISH: o'chirilgan kategoriya tugmasi botda darhol
+  /// yo'qoladi, lekin ESKI MUAMMOLAR o'z kategoriyasini saqlab qoladi.
+  /// Qattiq o'chirish tarixni buzardi.
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  issues Issue[]
+
+  @@index([isActive, sortOrder])
+  @@map("issue_categories")
+}
+
+/// RASMIY MUROJAAT — ma'muriyat ishlaydigan navbat.
+model Issue {
+  id String @id @default(cuid())
+
+  /// Odam o'qiydigan raqam ("MFY-000123").
+  ///
+  /// ⚠️ KETMA-KET VA TESHIKSIZ BO'LISHI SHART EMAS — muhimi
+  /// takrorlanmasligi. Teshiksizlikni kafolatlash har yaratishda
+  /// jadvalni lock qilishni talab qilardi.
+  publicNo String @unique @map("public_no")
+
+  categoryId String @map("category_id")
+
+  source IssueSource
+
+  /// ⚠️ HUDUD MUAMMOGA MUHRLANADI, guruhdan JONLI o'qilmaydi. Guruhning
+  /// MFY biriktirishi keyinroq o'zgarishi mumkin (xato tuzatildi, guruh
+  /// boshqa mahallaga o'tdi) va o'shanda o'tgan hisobot JIMGINA qayta
+  /// yozilardi: "mart oyida Chilonzorda 12 ta murojaat" degan raqam
+  /// o'zgarib ketardi.
+  mahallaId String? @map("mahalla_id")
+
+  title String
+  body  String
+
+  status   IssueStatus   @default(new)
+  priority IssuePriority @default(normal)
+
+  /// ── MUALLIF ─────────────────────────────────────────────────────
+  ///
+  /// ⚠️ `authorId` — TIZIM XODIMI. Guruhda yozgan aholi tizimda
+  /// foydalanuvchi EMAS, shuning uchun signal biriktirilganda muallif
+  /// BIRIKTIRGAN ODAM bo'ladi. Haqiqiy manba yo'qolmaydi: ismi, guruh
+  /// nomi va xabar havolasi `sourceMeta` da qoladi.
+  authorId String? @map("author_id")
+
+  /// Botdan kelgan bo'lsa — javob AYNAN SHU chatga qaytadi, keyin
+  /// bog'lanish uzilsa ham.
+  ///
+  /// ⚠️ SIGNALDAN KELGANDA ATAYLAB BO'SH: javob MFY guruhiga ketib
+  /// qolmasligi kerak — bot u yerda KUZATUVCHI va hech narsa
+  /// yozmasligi kerak.
+  authorChatId String? @map("author_chat_id")
+
+  /// Manba haqida barcha ma'lumot: guruh nomi, yozgan odam, xabar
+  /// havolasi, AI toifasi.
+  ///
+  /// ⚠️ JSON — chunki manbaga qarab maydonlar BOSHQA bo'ladi va
+  /// ularning har biri uchun ustun ochish jadvalni yarmi bo'sh
+  /// ustunlar bilan to'ldirardi.
+  sourceMeta Json? @map("source_meta")
+
+  /// ── IJRO ────────────────────────────────────────────────────────
+  assigneeId String? @map("assignee_id")
+
+  /// ⚠️ MUDDAT — MAJBURIYAT EMAS, MO'LJAL. Tizim uni o'tganda hech
+  /// narsa qilmaydi (avtomatik eskalatsiya yo'q), faqat panelda
+  /// ajratib ko'rsatadi. Avtomatik harakat qo'shilsa, u darhol
+  /// "muddatni surib qo'yish" amaliyotini tug'dirardi.
+  dueAt DateTime? @map("due_at")
+
+  /// Yopilganda — kim, qachon va QANDAY hal qildi. `resolution`
+  /// botdagi muallifga javob sifatida ketadi.
+  resolution String?
+  reviewedBy String?   @map("reviewed_by")
+  reviewedAt DateTime? @map("reviewed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  category IssueCategory  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  mahalla  Mahalla?       @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
+  author   User?          @relation("IssueAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  assignee User?          @relation("IssueAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  reviewer User?          @relation("IssueReviewedBy", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  comments IssueComment[]
+  signal   GroupSignal?
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([mahallaId, status])
+  @@index([categoryId, status])
+  @@index([assigneeId, status])
+  @@map("issues")
+}
+
+/// MUAMMO YOZISHMASI — ichki izohlar.
+///
+/// ⚠️ APPEND-ONLY: izoh tahrirlanmaydi ham, o'chirilmaydi ham. Bu
+/// muammo bo'yicha qaror tarixi va uni qayta yozish mumkin emas. Xato
+/// yozilsa — yangi izoh qo'shiladi.
+model IssueComment {
+  id String @id @default(cuid())
+
+  issueId String @map("issue_id")
+  userId  String @map("user_id")
+
+  body String
+
+  /// ⚠️ `true` bo'lsa izoh MUALLIFGA (botga) ham ketadi. Standart
+  /// `false`: ichki muhokama tashqariga chiqmasligi kerak.
+  isPublic Boolean @default(false) @map("is_public")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([issueId, createdAt])
+  @@map("issue_comments")
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  SOZLAMALAR VA AUDIT
+// ══════════════════════════════════════════════════════════════════════
+
+/// TIZIM SOZLAMALARI — SINGLETON.
+///
+/// ⚠️ BITTA QATOR: `id` har doim `"singleton"`. Alohida `key/value`
+/// jadvali emas, chunki sozlamalar soni oz va ularning TURI muhim (son,
+/// bayroq, satr) — `value String` bo'lsa har o'qishda parse va tekshiruv
+/// kerak bo'lardi.
+model Settings {
+  id String @id @default("singleton")
+
+  /// Viloyat/tashkilot nomi — hisobot sarlavhasida.
+  orgName String @default("Viloyat shtabi") @map("org_name")
+
+  /// ── AI TAHLILI ──────────────────────────────────────────────────
+  ///
+  /// ⚠️ MODEL NOMI BU YERDA YO'Q. U KODDA
+  /// (`signals/ai/signal-ai.constants.ts`): model almashtirish kod
+  /// o'zgarishi va review'dan o'tishi kerak, tasodifiy sozlama tahriri
+  /// emas. Bu yerda faqat YOQISH/O'CHIRISH va chegaralar.
+  aiEnabled Boolean @default(true) @map("ai_enabled")
+
+  /// Tahlil qancha vaqtda bir ishlaydi (daqiqa).
+  ///
+  /// ⚠️ CRON IFODASI QOTIB QOLMASLIGI UCHUN bazadan o'qiladi: job har
+  /// daqiqada ishga tushadi va "vaqti keldimi" deb O'ZI tekshiradi
+  /// (`signals.job.ts`). Cron ifodasini kodga yozib qo'ysak, uni
+  /// o'zgartirish uchun deploy kerak bo'lardi.
+  aiIntervalMinutes Int @default(30) @map("ai_interval_minutes")
+
+  /// Bitta aylanishda ko'riladigan eng ko'p xabar.
+  ///
+  /// ⚠️ CHEGARA JOB'NI PREDSKAZUEMY QILADI: bot bir kecha ishlab,
+  /// ertalab server ko'tarilsa minglab xabar yig'ilgan bo'lishi mumkin.
+  /// Hammasi bitta aylanishda AI'ga ketsa — hisob ham, vaqt ham
+  /// portlardi. Qolgani keyingi aylanishda ko'riladi.
+  aiMaxMessagesPerRun Int @default(300) @map("ai_max_messages_per_run")
+
+  /// Tahlil qilingan xabar qancha turib o'chiriladi (soat).
+  messageRetentionHours Int @default(24) @map("message_retention_hours")
+
+  /// ── BILDIRISHNOMA ───────────────────────────────────────────────
+  ///
+  /// Yuqori jiddiylikdagi signal chiqsa — shu chatlarga xabar. Bo'sh
+  /// massiv = o'chirilgan.
+  alertChatIds String[] @default([]) @map("alert_chat_ids")
+  /// Qaysi darajadan boshlab xabar ketadi.
+  alertMinSeverity SignalSeverity @default(high) @map("alert_min_severity")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@map("settings")
+}
+
+/// AUDIT — kim nima qildi.
+///
+/// ⚠️ FAQAT MUHIM AMALLAR yoziladi, har so'rov emas: login, ruxsat
+/// o'zgarishi, guruhni rasmiy qilish, signalni biriktirish/yopish,
+/// muammo holati. "Hamma narsani yozish" jurnalni o'qib bo'lmaydigan
+/// qilardi va u o'shandan keyin hech kimga kerak bo'lmasdi.
+model AuditLog {
+  id String @id @default(cuid())
+
+  userId String? @map("user_id")
+  /// "auth.login", "group.official", "signal.attach", "issue.resolve"
+  action String
+  /// Qaysi obyekt ustida.
+  entity   String?
+  entityId String? @map("entity_id")
+
+  /// Qo'shimcha kontekst (eski/yangi qiymat).
+  meta Json?
+
+  ip        String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
