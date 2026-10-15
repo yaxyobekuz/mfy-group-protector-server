@@ -764,3 +764,111 @@ model AuditLog {
   @@index([entity, entityId])
   @@map("audit_logs")
 }
+
+// ═══════════════════════════════════════════════════════════════════
+//  XAVFSIZLIK — guruhga tashlangan zararli fayl va havolalar
+// ═══════════════════════════════════════════════════════════════════
+
+/// Nima aniqlangani.
+///
+/// ⚠️ TUR SAQLANADI, chunki ular BOSHQACHA ko'riladi: APK — qasddan
+/// tarqatilgan dastur, qisqartirilgan havola esa ko'pincha oddiy
+/// odamning e'loni. Ikkisini bitta "shubhali" qopiga solish
+/// hisobotni ma'nosiz qilardi.
+enum ThreatKind {
+  /// Telegram orqali tashlangan o'rnatma fayl (apk, exe, msi...).
+  apk_file
+  /// Umuman ruxsat etilmagan turdagi hujjat.
+  unknown_file
+  /// Qora ro'yxatdagi yoki shubhali domen.
+  suspicious_url
+  /// Havolani yashiradigan qisqartirgich (bit.ly va o'xshashlari).
+  shortened_url
+  /// Matn ichida ko'rinadigan havola HAQIQIY manzildan farq qiladi.
+  masked_url
+}
+
+/// Bot nima qila oldi.
+///
+/// ⚠️ "ANIQLANDI" VA "O'CHIRILDI" ALOHIDA: bot admin bo'lmasa
+/// o'chira OLMAYDI (Telegram ruxsat bermaydi) va bu holat panelda
+/// KO'RINISHI kerak — aks holda ma'muriyat "tizim ishlayapti" deb
+/// o'ylab, zararli fayl guruhda qolib ketardi.
+enum ThreatAction {
+  /// O'chirildi.
+  deleted
+  /// Aniqlandi, lekin o'chirilmadi (botda huquq yo'q yoki muddati o'tgan).
+  detected
+  /// O'chirishga urinildi va Telegram rad etdi.
+  delete_failed
+}
+
+/// XAVFSIZLIK HODISASI — guruhda aniqlangan zararli kontent.
+///
+/// ⚠️ BU `GroupSignal` EMAS. Signal — AI TAXMINI va u odam qaroriga
+/// muhtoj. Bu yerda esa qoida QAT'IY ("apk = zararli") va bot
+/// darhol harakat qiladi. Ikkisini bitta jadvalga qo'shish
+/// "signallar — taxmin" degan doktrinani buzardi.
+///
+/// ⚠️ YOZUV APPEND-ONLY: o'chirilmaydi va tahrirlanmaydi. Bu —
+/// xavfsizlik dalili va kimdir uni "tozalab" qo'ya olmasligi kerak.
+model SecurityEvent {
+  id String @id @default(cuid())
+
+  chatId String @map("chat_id")
+  /// ⚠️ `String?`: xabar o'chirilgach Telegram'da u yo'q, lekin
+  /// raqami dalil sifatida qoladi.
+  messageId String? @map("message_id")
+
+  kind   ThreatKind
+  action ThreatAction
+
+  /// ── KIM TASHLADI (muhrlangan) ───────────────────────────────────
+  ///
+  /// ⚠️ NUSXA OLINADI, jonli o'qilmaydi: odam guruhdan chiqib
+  /// ketsa ham "kim tashlagani" hisobotda qolishi kerak.
+  senderTgId    String? @map("sender_tg_id")
+  senderName    String? @map("sender_name")
+  senderUsername String? @map("sender_username")
+
+  /// ── FAYL HAQIDA ─────────────────────────────────────────────────
+  fileName String? @map("file_name")
+  /// Telegram aytgan MIME turi — ISHONCHSIZ (yuboruvchi o'zgartira
+  /// oladi), shuning uchun kengaytma ALOHIDA saqlanadi.
+  fileMime String? @map("file_mime")
+  fileSize Int?    @map("file_size")
+  /// Telegram `file_unique_id` — AYNI fayl boshqa guruhda ham
+  /// tashlanganini topish uchun.
+  fileUniqueId String? @map("file_unique_id")
+
+  /// ── HAVOLA HAQIDA ───────────────────────────────────────────────
+  /// Aniqlangan havola (to'liq).
+  url String?
+  /// Faqat domen — hisobotda guruhlash shu bo'yicha.
+  urlHost String? @map("url_host")
+
+  /// Nima uchun zararli deb topilgani (qoida kaliti).
+  reason String
+
+  /// Xabar matni — dalil sifatida (kesilgan).
+  ///
+  /// ⚠️ SAQLANADI, chunki xabar O'CHIRILADI va undan keyin
+  /// ma'muriyat nima yozilganini KO'RA OLMAYDI.
+  messageText String? @map("message_text")
+
+  /// Telegram rad etgan bo'lsa — sababi.
+  errorMessage String? @map("error_message")
+
+  sentAt    DateTime? @map("sent_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  group TelegramGroup @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+
+  /// ⚠️ Bir xabar ikki marta kelishi mumkin (bot qayta ishga tushdi,
+  /// Telegram takrorladi) — dublikat yozuv hisobotni shishirardi.
+  @@unique([chatId, messageId])
+  @@index([chatId, createdAt(sort: Desc)])
+  @@index([kind, createdAt(sort: Desc)])
+  @@index([senderTgId])
+  @@map("security_events")
+}
