@@ -27,7 +27,7 @@ import {
   signalScopeWhere,
   type ScopeContext,
 } from "../../common/scope.util";
-import { tashkentDayStart } from "../../common/date.util";
+import { TASHKENT_OFFSET_MINUTES, tashkentDayStart } from "../../common/date.util";
 import { IssueStatus, type Prisma } from "@prisma/client";
 import type { ReportQuery } from "./dto/reports.dto";
 
@@ -308,17 +308,33 @@ export class ReportsService {
     // so'rovdan ko'ra oddiy va xavfsiz.
     const buckets = new Map<string, { date: string; total: number; resolved: number }>();
 
+    /**
+     * TOSHKENT KUNI KALITI — IKKALA TOMON UCHUN BITTA FUNKSIYA.
+     *
+     * ⚠️ AVVAL IKKI XIL HISOBLANARDI va kalitlar HAR DOIM bir
+     * kunga farq qilardi: savat `tashkentDayStart()` qaytargan
+     * INSTANT'ni (`...T19:00Z` — Toshkent yarim tunining UTC
+     * ko'rinishi) kesib olardi, ya'ni "kecha"ni; murojaat esa
+     * `+5 soat` bilan to'g'ri "bugun"ni berardi.
+     *
+     * Natijasi: bugungi murojaatlar hech qanday savatga
+     * tushmasdi va grafikda JIMGINA yo'qolardi — xato emas,
+     * shunchaki doim nol.
+     */
+    const tashkentDayKey = (value: Date): string =>
+      new Date(value.getTime() + TASHKENT_OFFSET_MINUTES * 60_000)
+        .toISOString()
+        .slice(0, 10);
+
     for (let offset = 0; offset < days; offset += 1) {
-      const day = tashkentDayStart(-(days - 1 - offset));
-      const key = day.toISOString().slice(0, 10);
+      // ⚠️ `tashkentDayStart` INSTANT qaytaradi — uni ham AYNI
+      // funksiya bilan kalitga aylantiramiz.
+      const key = tashkentDayKey(tashkentDayStart(-(days - 1 - offset)));
       buckets.set(key, { date: key, total: 0, resolved: 0 });
     }
 
     for (const issue of issues) {
-      // Toshkent kuni: +5 soat qo'shib, ISO sanasini olamiz.
-      const key = new Date(issue.createdAt.getTime() + 5 * 3_600_000)
-        .toISOString()
-        .slice(0, 10);
+      const key = tashkentDayKey(issue.createdAt);
       const bucket = buckets.get(key);
       if (!bucket) continue;
 

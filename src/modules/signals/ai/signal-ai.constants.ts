@@ -15,7 +15,7 @@
  */
 
 /** Tasnif modeli — arzon va tez. */
-export const MODEL = "gpt-5.4-nano";
+export const MODEL = "gpt-5-nano";
 
 /**
  * ⚠️ `temperature` YUBORILMAYDI. 5.x oilasidagi modellar uni QABUL
@@ -47,7 +47,21 @@ export const MAX_SIGNALS = 10;
  */
 export const MAX_SUMMARY = 300;
 
-export const MAX_OUTPUT_TOKENS = 2000;
+/**
+ * ⚠️ BU CHEGARA REASONING TOKENLARINI HAM O'Z ICHIGA OLADI.
+ * 5.x "nano" modellari javobdan OLDIN ichki o'ylashga token
+ * sarflaydi (oddiy so'rovda ham ~1000 ta) va u shu limitdan
+ * yeyiladi.
+ *
+ * 2000 bo'lganda 60 tagacha xabarli to'plamda o'ylash limitni
+ * to'ldirib, JSON javobi YARMIDA kesilardi — `finish_reason:
+ * "length"`. Natijada guruh har aylanishda "tahlil qilinmadi"
+ * bo'lib, signal UMUMAN chiqmasdi (navbat esa o'sib borardi).
+ *
+ * ⚠️ KAMAYTIRMANG. Javobning o'zi qisqa (~10 qator JSON), lekin
+ * zaxira o'ylash uchun kerak.
+ */
+export const MAX_OUTPUT_TOKENS = 8000;
 
 /**
  * TIZIM PROMPTI.

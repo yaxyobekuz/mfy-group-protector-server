@@ -58,8 +58,15 @@ const MONTHS_UZ_CAP = MONTHS_UZ.map(
 /** Bo'sh yoki yaroqsiz qiymat — `Invalid Date` yoki bo'sh satr EMAS. */
 const EMPTY = "—";
 
-/** Toshkent (+5), DST yo'q. */
-const TASHKENT_OFFSET_MINUTES = 5 * 60;
+/**
+ * Toshkent (+5), DST yo'q.
+ *
+ * ⚠️ EKSPORT QILINGAN: boshqa modullar "+5 soat" ni QO'LDA
+ * yozmasligi uchun (`createdAt.getTime() + 5 * 3_600_000` kabi).
+ * Qo'lda yozilganda u bu fayldagi mantiqdan ajralib ketardi va
+ * aynan shunday xato hisobotda bir kunlik siljishga olib kelgan.
+ */
+export const TASHKENT_OFFSET_MINUTES = 5 * 60;
 
 /**
  * Qiymatni `Date` ga keltiradi; yaroqsiz bo'lsa `null`.
