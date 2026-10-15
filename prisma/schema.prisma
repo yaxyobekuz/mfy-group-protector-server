@@ -345,10 +345,28 @@ model TelegramGroup {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  /// ── XAVFSIZLIK QALQONI ──────────────────────────────────────────
+  ///
+  /// ⚠️ `isOfficial` DAN ALOHIDA va bu ATAYLAB. `isOfficial` —
+  /// yozishmani O'QISHGA rozilik; qalqon esa aholini himoya qiladi
+  /// va "o'qimayman" degan guruhda ham kerak bo'lishi mumkin.
+  /// Ikkisini bitta belgiga bog'lash "kuzatuvni yoqmagunimcha
+  /// viruslardan himoya ham yo'q" degan noto'g'ri bog'liqlik
+  /// yaratardi.
+  ///
+  /// ⚠️ STANDART `false`: bot guruhga qo'shilishi bilan xabar
+  /// o'chira boshlashi mumkin emas. Ma'muriyat buni ATAYLAB
+  /// yoqadi — o'chirish qaytarib bo'lmaydigan amal.
+  guardEnabled Boolean   @default(false) @map("guard_enabled")
+  guardAt      DateTime? @map("guard_at")
+  guardBy      String?   @map("guard_by")
+
   mahalla      Mahalla?       @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
   officialUser User?          @relation("GroupOfficialBy", fields: [officialBy], references: [id], onDelete: SetNull)
+  guardUser    User?          @relation("GroupGuardBy", fields: [guardBy], references: [id], onDelete: SetNull)
   messages     GroupMessage[]
   signals      GroupSignal[]
+  securityEvents SecurityEvent[]
 
   @@index([isOfficial, status])
   @@index([mahallaId])
