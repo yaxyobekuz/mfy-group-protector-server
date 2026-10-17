@@ -88,7 +88,30 @@ const URL_SHORTENERS = new Set([
  * `https://sberbank.ru@evil.com` brauzerda `evil.com` ga boradi,
  * lekin odam boshida `sberbank.ru` ni ko'radi.
  */
-const URL_REGEX = /\bhttps?:\/\/[^\s<>"']+|(?<![@\w.])(?:www\.)[^\s<>"']+/gi;
+/**
+ * ⚠️ SXEMASIZ DOMEN HAM USHLANADI (`gov.uz/vplt`). Oldin regex
+ * faqat `http://` yoki `www.` bilan boshlanganini topardi va
+ * HAQIQIY firibgarlik xabari aynan shu teshikdan o'tib ketdi:
+ * matnda `gov.uz/vplt` yozilgan, `https://` yo'q edi.
+ *
+ * ⚠️ TLD RO'YXATI CHEKLANGAN: har qanday `so'z.so'z` ni domen deb
+ * hisoblash "narx 1.5 mln", "soat 10.30 da" kabi oddiy matnni
+ * havolaga aylantirardi.
+ */
+const BARE_DOMAIN_TLDS =
+  "uz|com|net|org|ru|info|biz|xyz|top|site|online|shop|store|club|live|app|dev|io|co|me|tv|pro|link|click|win|vip";
+
+const URL_REGEX = new RegExp(
+  [
+    // 1. To'liq sxemali havola
+    String.raw`\bhttps?:\/\/[^\s<>"']+`,
+    // 2. www. bilan boshlangan
+    String.raw`(?<![@\w.])www\.[^\s<>"']+`,
+    // 3. Sxemasiz domen: gov.uz/vplt, example.xyz
+    String.raw`(?<![@\w.\/])(?:[a-z0-9][a-z0-9-]*\.)+(?:${BARE_DOMAIN_TLDS})(?:\/[^\s<>"']*)?(?![a-z0-9-])`,
+  ].join("|"),
+  "gi",
+);
 
 /** Fayl nomidan kengaytma — oxirgi nuqtadan keyingi qism. */
 const extensionOf = (fileName: string): string => {
