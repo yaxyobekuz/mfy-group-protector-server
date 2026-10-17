@@ -31,7 +31,14 @@ export class ReportThreatDto {
 
   @IsOptional() @IsString() @MaxLength(64) messageId?: string;
 
-  @IsIn(["apk_file", "unknown_file", "suspicious_url", "shortened_url", "masked_url"])
+  @IsIn([
+    "apk_file",
+    "unknown_file",
+    "suspicious_url",
+    "shortened_url",
+    "masked_url",
+    "scam_text",
+  ])
   kind!: string;
 
   @IsIn(["deleted", "detected", "delete_failed"])
@@ -70,7 +77,14 @@ export class ListSecurityQuery extends PaginationQuery {
   @IsOptional() @IsString() chatId?: string;
 
   @IsOptional()
-  @IsIn(["apk_file", "unknown_file", "suspicious_url", "shortened_url", "masked_url"])
+  @IsIn([
+    "apk_file",
+    "unknown_file",
+    "suspicious_url",
+    "shortened_url",
+    "masked_url",
+    "scam_text",
+  ])
   kind?: string;
 
   @IsOptional()

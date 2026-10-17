@@ -825,6 +825,8 @@ enum ThreatKind {
   shortened_url
   /// Matn ichida ko'rinadigan havola HAQIQIY manzildan farq qiladi.
   masked_url
+  /// Firibgarlik matni: "davlat yordami" aldovi + ishonchsiz havola.
+  scam_text
 }
 
 /// Bot nima qila oldi.
