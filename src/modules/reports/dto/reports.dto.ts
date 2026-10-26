@@ -1,5 +1,14 @@
 import { Type } from "class-transformer";
-import { IsISO8601, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
+import {
+  IsEnum,
+  IsISO8601,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from "class-validator";
+import { IssueStatus } from "@prisma/client";
 
 export class ReportQuery {
   /** ISO sana ("2026-01-01"). Berilmasa — butun tarix. */
@@ -9,6 +18,9 @@ export class ReportQuery {
   @IsOptional() @IsString() districtId?: string;
   @IsOptional() @IsString() mahallaId?: string;
   @IsOptional() @IsString() categoryId?: string;
+
+  /** Faqat xarita kesimida ishlatiladi. */
+  @IsOptional() @IsEnum(IssueStatus) status?: IssueStatus;
 }
 
 export class DailyQuery {

@@ -9,16 +9,21 @@
  * ayni sabab).
  */
 
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { IssueStatus, type Prisma } from "@prisma/client";
 
+import { env } from "../../config/env.config";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../../common/audit.service";
 import { paginate } from "../../common/dto/pagination.dto";
-import type { BlockCitizenDto, ListCitizensQuery } from "./dto/citizens.dto";
+import type { BlockCitizenDto, BroadcastDto, ListCitizensQuery } from "./dto/citizens.dto";
+
+const TELEGRAM_API = "https://api.telegram.org";
 
 @Injectable()
 export class CitizensService {
+  private readonly logger = new Logger(CitizensService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
@@ -140,5 +145,79 @@ export class CitizensService {
     });
 
     return { ok: true };
+  }
+
+  /**
+   * FUQAROLARGA XABAR YUBORISH — ularning SHAXSIY chatiga.
+   *
+   * ⚠️ YANGILIK E'LONIDAN FARQI: e'lon ilovada ko'rinadi (fuqaro o'zi
+   * ochadi); bu esa Telegram'da PUSH sifatida darhol yetib boradi.
+   * Shuning uchun u kuchliroq amal — `citizens.manage` va audit.
+   *
+   * ⚠️ BLOKLANGANLARGA YUBORILMAYDI. Ketma-ket yuboriladi (Telegram
+   * 429 bermasligi uchun) — `issue-notify.service.ts` bilan ayni sabab.
+   *
+   * ⚠️ XATO BITTA FUQARODA TO'XTATMAYDI: kimdir botni bloklagan
+   * bo'lsa (Telegram 403), qolganlarga yuborilaveradi.
+   */
+  async broadcast(dto: BroadcastDto, userId: string) {
+    if (!env.botToken) {
+      throw new BadRequestException(
+        "BOT_TOKEN sozlanmagan — xabar yuborib bo'lmaydi",
+      );
+    }
+
+    const recipients = await this.prisma.citizen.findMany({
+      where: {
+        isBlocked: false,
+        ...(dto.districtId ? { districtId: dto.districtId } : {}),
+      },
+      select: { telegramId: true },
+    });
+
+    const text = this.escapeHtml(dto.message.trim());
+    let sent = 0;
+    let failed = 0;
+
+    for (const citizen of recipients) {
+      const ok = await this.sendTelegram(citizen.telegramId, text);
+      if (ok) sent += 1;
+      else failed += 1;
+    }
+
+    await this.audit.record({
+      userId,
+      action: "citizen.broadcast",
+      entity: "Citizen",
+      meta: { districtId: dto.districtId ?? null, recipients: recipients.length, sent, failed },
+    });
+
+    return { recipients: recipients.length, sent, failed };
+  }
+
+  // ───────────────────────────────────────────────────────────────
+
+  private async sendTelegram(chatId: string, html: string): Promise<boolean> {
+    try {
+      const response = await fetch(`${TELEGRAM_API}/bot${env.botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: html,
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+        }),
+      });
+      return response.ok;
+    } catch (error) {
+      this.logger.warn(`Xabar yuborilmadi (${chatId}): ${(error as Error).message}`);
+      return false;
+    }
+  }
+
+  /** `parse_mode: HTML` uchun — `issue-notify.service.ts` bilan ayni. */
+  private escapeHtml(value: string): string {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 }

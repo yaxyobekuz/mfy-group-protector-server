@@ -44,6 +44,20 @@ export class ReportsController {
     return this.reports.signalMetrics(toScope(user), query);
   }
 
+  /** Mini App (fuqaro murojaatlari) analitikasi. */
+  @Get("mobile")
+  @RequirePermissions("reports.view")
+  mobile(@CurrentUser() user: RequestUser, @Query() query: ReportQuery) {
+    return this.reports.mobileMetrics(toScope(user), query);
+  }
+
+  /** Xarita uchun — koordinatali murojaatlar (qamrovga bo'ysunadi). */
+  @Get("map")
+  @RequirePermissions("reports.view")
+  map(@CurrentUser() user: RequestUser, @Query() query: ReportQuery) {
+    return this.reports.mapPoints(toScope(user), query);
+  }
+
   @Get("daily")
   @RequirePermissions("reports.view")
   daily(@CurrentUser() user: RequestUser, @Query() query: DailyQuery) {

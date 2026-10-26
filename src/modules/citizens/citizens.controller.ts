@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Query } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query } from "@nestjs/common";
 
 import {
   CurrentUser,
@@ -6,7 +6,7 @@ import {
   type RequestUser,
 } from "../../common/decorators";
 import { CitizensService } from "./citizens.service";
-import { BlockCitizenDto, ListCitizensQuery } from "./dto/citizens.dto";
+import { BlockCitizenDto, BroadcastDto, ListCitizensQuery } from "./dto/citizens.dto";
 
 @Controller("citizens")
 export class CitizensController {
@@ -32,5 +32,12 @@ export class CitizensController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.citizens.setBlocked(id, dto, user.id);
+  }
+
+  @Post("broadcast")
+  @HttpCode(200)
+  @RequirePermissions("citizens.manage")
+  broadcast(@Body() dto: BroadcastDto, @CurrentUser() user: RequestUser) {
+    return this.citizens.broadcast(dto, user.id);
   }
 }

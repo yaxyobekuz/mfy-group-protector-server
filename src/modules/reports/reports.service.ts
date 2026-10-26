@@ -28,7 +28,7 @@ import {
   type ScopeContext,
 } from "../../common/scope.util";
 import { TASHKENT_OFFSET_MINUTES, tashkentDayStart } from "../../common/date.util";
-import { IssueStatus, type Prisma } from "@prisma/client";
+import { IssueSource, IssueStatus, type Prisma } from "@prisma/client";
 import type { ReportQuery } from "./dto/reports.dto";
 
 const CLOSED: IssueStatus[] = [IssueStatus.resolved, IssueStatus.rejected];
@@ -78,7 +78,7 @@ export class ReportsService {
     };
     for (const row of byStatus) statusCounts[row.status] = row._count._all;
 
-    const sourceCounts: Record<string, number> = { signal: 0, bot: 0, manual: 0 };
+    const sourceCounts: Record<string, number> = { signal: 0, bot: 0, manual: 0, mobile: 0 };
     for (const row of bySource) sourceCounts[row.source] = row._count._all;
 
     const total = Object.values(statusCounts).reduce((sum, count) => sum + count, 0);
@@ -343,6 +343,157 @@ export class ReportsService {
     }
 
     return [...buckets.values()];
+  }
+
+  /**
+   * MINI APP ANALITIKASI — fuqaro murojaatlari kesimi.
+   *
+   * ⚠️ FAQAT `source=mobile`: bu hisobot ilovadan kelgan oqimni
+   * o'lchaydi, bot/signal/manual EMAS. Fuqaro faolligi, yo'nalishlar,
+   * SLA bajarilishi va fuqaroga javob vaqti shu yerda.
+   */
+  async mobileMetrics(scope: ScopeContext, query: ReportQuery) {
+    const where: Prisma.IssueWhereInput = {
+      ...this.baseWhere(scope, query),
+      source: IssueSource.mobile,
+    };
+
+    const [byStatus, resolved, overdue, byCategory, citizenAgg, topCitizens] =
+      await Promise.all([
+        this.prisma.issue.groupBy({ by: ["status"], where, _count: { _all: true } }),
+        // Hal qilingan mobil murojaatlar — javob vaqti + SLA uchun.
+        this.prisma.issue.findMany({
+          where: { ...where, status: { in: CLOSED }, reviewedAt: { not: null } },
+          select: { createdAt: true, reviewedAt: true, dueAt: true },
+        }),
+        this.prisma.issue.count({
+          where: { ...where, dueAt: { lt: new Date() }, status: { notIn: CLOSED } },
+        }),
+        this.prisma.issue.groupBy({ by: ["categoryId"], where, _count: { _all: true } }),
+        // ⚠️ FUQARO SANOG'I QAMROVGA BOG'LANMAYDI: fuqaro hududiy
+        // obyekt emas (`Citizen` da MFY/tuman ixtiyoriy). Jami /
+        // bloklangan sanoq butun tizim bo'yicha.
+        this.prisma.citizen.aggregate({ _count: { _all: true } }),
+        this.prisma.citizen.findMany({
+          where: { points: { gt: 0 }, isBlocked: false },
+          orderBy: { points: "desc" },
+          take: 5,
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            points: true,
+            _count: { select: { issues: true } },
+          },
+        }),
+      ]);
+
+    const [blockedCitizens, activeCitizens] = await Promise.all([
+      this.prisma.citizen.count({ where: { isBlocked: true } }),
+      // "Faol" — kamida bitta murojaat yuborgan.
+      this.prisma.citizen.count({ where: { issues: { some: {} } } }),
+    ]);
+
+    const statusCounts: Record<string, number> = {
+      new: 0,
+      in_progress: 0,
+      resolved: 0,
+      rejected: 0,
+    };
+    for (const row of byStatus) statusCounts[row.status] = row._count._all;
+    const total = Object.values(statusCounts).reduce((sum, c) => sum + c, 0);
+
+    // Fuqaroga javob vaqti (soat) + SLA ichida bajarilgani.
+    let onTime = 0;
+    const avgResponseHours =
+      resolved.length > 0
+        ? Math.round(
+            (resolved.reduce((sum, issue) => {
+              if (issue.dueAt && issue.reviewedAt! <= issue.dueAt) onTime += 1;
+              return sum + (issue.reviewedAt!.getTime() - issue.createdAt.getTime());
+            }, 0) /
+              resolved.length /
+              3_600_000) *
+              10,
+          ) / 10
+        : null;
+
+    // Yo'nalish nomlarini biriktiramiz.
+    const categoryIds = byCategory.map((row) => row.categoryId);
+    const categories = await this.prisma.issueCategory.findMany({
+      where: { id: { in: categoryIds } },
+      select: { id: true, name: true, color: true, icon: true, slaHours: true },
+    });
+    const catMap = new Map(categories.map((c) => [c.id, c]));
+
+    return {
+      total,
+      status: statusCounts,
+      open: statusCounts.new! + statusCounts.in_progress!,
+      overdue,
+      resolutionRate:
+        total > 0 ? Math.round((statusCounts.resolved! / total) * 1000) / 10 : null,
+      avgResponseHours,
+      // SLA ichida bajarilgan ulush (hal qilinganlar orasida).
+      slaOnTimeRate:
+        resolved.length > 0 ? Math.round((onTime / resolved.length) * 1000) / 10 : null,
+      citizens: {
+        total: citizenAgg._count._all,
+        active: activeCitizens,
+        blocked: blockedCitizens,
+      },
+      categories: byCategory
+        .map((row) => ({
+          id: row.categoryId,
+          name: catMap.get(row.categoryId)?.name ?? "—",
+          color: catMap.get(row.categoryId)?.color ?? null,
+          icon: catMap.get(row.categoryId)?.icon ?? null,
+          count: row._count._all,
+        }))
+        .sort((a, b) => b.count - a.count),
+      topCitizens: topCitizens.map((c) => ({
+        id: c.id,
+        name: [c.firstName, c.lastName].filter(Boolean).join(" "),
+        points: c.points,
+        appeals: c._count.issues,
+      })),
+    };
+  }
+
+  /**
+   * XARITA NUQTALARI — koordinatasi bor murojaatlar.
+   *
+   * ⚠️ QAMROVGA BO'YSUNADI (`baseWhere`): tuman xodimi faqat o'z
+   * tumanidagi nuqtalarni ko'radi. Koordinata asosan `mobile`
+   * murojaatlarda bor (fuqaro xaritada belgilaydi).
+   *
+   * ⚠️ CHEGARA BOR (2000): butun jadvalni xaritaga tortish brauzerni
+   * yiqitardi. Eng yangilari olinadi.
+   */
+  async mapPoints(scope: ScopeContext, query: ReportQuery) {
+    const rows = await this.prisma.issue.findMany({
+      where: {
+        ...this.baseWhere(scope, query),
+        lat: { not: null },
+        lng: { not: null },
+        ...(query.status ? { status: query.status } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: 2000,
+      select: {
+        id: true,
+        publicNo: true,
+        title: true,
+        lat: true,
+        lng: true,
+        status: true,
+        source: true,
+        createdAt: true,
+        category: { select: { id: true, name: true, color: true, icon: true } },
+      },
+    });
+
+    return rows;
   }
 
   // ───────────────────────────────────────────────────────────────
