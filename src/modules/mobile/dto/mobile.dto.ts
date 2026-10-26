@@ -36,6 +36,23 @@ export class TelegramAuthDto {
   @IsString() @MaxLength(8192) initData!: string;
 }
 
+/**
+ * ⚠️ TELEGRAM LOGIN UCHUN DTO YO'Q VA BU ATAYLAB.
+ *
+ * Imzo (`hash`) Telegram YUBORGAN BARCHA maydonlar ustidan
+ * hisoblanadi. Global `ValidationPipe` esa `whitelist: true` +
+ * `forbidNonWhitelisted: true` bilan ishlaydi — ya'ni DTO'da
+ * e'lon qilinmagan maydonni YO rad etadi, YO olib tashlaydi.
+ *
+ * Ikkalasi ham imzoni buzardi:
+ *   — rad etilsa  → Telegram yangi maydon qo'shgan kuni kirish o'ladi;
+ *   — tashlansa   → `data_check_string` to'liq bo'lmay, imzo mos kelmasdi.
+ *
+ * Shuning uchun u yo'l xom `Record` qabul qiladi va TEKSHIRUV
+ * IMZONING O'ZIDA (`verifyOAuthPayload`) — u maydon nomlarini
+ * emas, imzoni tekshiradi, ya'ni soxta maydon qo'shib bo'lmaydi.
+ */
+
 /** ⚠️ FAQAT DEV: server `NODE_ENV=production` da o'zi rad etadi. */
 export class DevAuthDto {
   @IsString() @MaxLength(32) telegramId!: string;

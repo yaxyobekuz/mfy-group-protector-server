@@ -61,6 +61,24 @@ export class MobileController {
     return this.auth.loginWithInitData(dto.initData);
   }
 
+  /**
+   * TELEGRAM LOGIN — MUSTAQIL ILOVA (APK) UCHUN.
+   *
+   * ⚠️ XOM `Record` QABUL QILADI, DTO EMAS: global `ValidationPipe`
+   * (`whitelist` + `forbidNonWhitelisted`) e'lon qilinmagan maydonni
+   * olib tashlardi yoki rad etardi va imzo BUZILARDI. Sabab
+   * `dto/mobile.dto.ts` dagi izohda batafsil.
+   *
+   * ⚠️ XAVFSIZ: maydon nomlari emas, IMZO tekshiriladi — soxta
+   * maydon qo'shilsa imzo mos kelmaydi va kirish rad etiladi.
+   */
+  @Public()
+  @Post("auth/telegram-login")
+  @HttpCode(200)
+  authTelegramLogin(@Body() payload: Record<string, unknown>) {
+    return this.auth.loginWithTelegramOAuth(payload ?? {});
+  }
+
   @Public()
   @Post("auth/dev")
   @HttpCode(200)

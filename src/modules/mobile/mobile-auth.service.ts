@@ -18,7 +18,7 @@
  * tokeni panelga struktura jihatidan KIRA OLMAYDI.
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 import {
   ForbiddenException,
@@ -44,6 +44,15 @@ interface TelegramUser {
 /** `initData` eskirgan deb hisoblanadigan muddat (soniya). */
 const INIT_DATA_MAX_AGE = 24 * 60 * 60;
 
+/**
+ * Telegram Login imzosining amal qilish muddati (soniya).
+ *
+ * ⚠️ `initData` DAN QISQA (1 soat): u Telegram ichida har ochilishda
+ * yangilanadi, Login imzosi esa bir martalik va qo'lga tushsa uzoq
+ * muddat qayta ishlatilishi mumkin bo'lardi.
+ */
+const OAUTH_MAX_AGE = 60 * 60;
+
 @Injectable()
 export class MobileAuthService {
   private readonly logger = new Logger(MobileAuthService.name);
@@ -61,6 +70,52 @@ export class MobileAuthService {
     const user = this.verifyInitData(initData);
     if (!user) {
       throw new UnauthorizedException("Telegram imzosi yaroqsiz — ilovani qayta oching");
+    }
+
+    return this.upsertAndIssue({
+      telegramId: String(user.id),
+      firstName: user.first_name?.trim() || "Fuqaro",
+      lastName: user.last_name?.trim() || null,
+      username: user.username?.trim() || null,
+      photoUrl: user.photo_url?.trim() || null,
+      languageCode: user.language_code?.trim() || "uz",
+    });
+  }
+
+  /**
+   * TELEGRAM LOGIN WIDGET — MUSTAQIL ILOVA (APK) UCHUN KIRISH.
+   *
+   * ── NIMA UCHUN ALOHIDA YO'L ───────────────────────────────────────
+   *
+   * ⚠️ `initData` NI FAQAT TELEGRAM MIJOZI BERADI — ya'ni mini-ilova
+   * ichida. Play Market'dan o'rnatilgan MUSTAQIL ilovada u YO'Q va
+   * yuqoridagi yo'l u yerda hech qachon ishlamaydi.
+   *
+   * Telegram Login (oauth) esa aynan shu holat uchun: foydalanuvchi
+   * Telegram'da tasdiqlaydi, bizga IMZOLANGAN maydonlar qaytadi.
+   *
+   * ── IMZO SXEMASI initData'DAN BOSHQACHA ───────────────────────────
+   *
+   * ⚠️ IKKI SXEMA ARALASHTIRILMAYDI:
+   *
+   *   initData → secret = HMAC_SHA256("WebAppData" kaliti, bot_token)
+   *   Login    → secret = SHA256(bot_token)            ← XESH, HMAC EMAS
+   *
+   * Aralashtirilsa imzo HECH QACHON to'g'ri kelmasdi va sabab
+   * "yaroqsiz imzo" degan umumiy xatoda ko'rinmasdi.
+   *
+   * ⚠️ MUDDAT QISQA (1 soat): `initData` 24 soat yashaydi, chunki u
+   * Telegram ichida har ochilishda yangilanadi. Login imzosi esa
+   * BIR MARTALIK va u qo'lga tushsa, uzoq muddat qayta
+   * ishlatilishi mumkin bo'lardi.
+   */
+  async loginWithTelegramOAuth(payload: Record<string, unknown>): Promise<{
+    token: string;
+    citizen: unknown;
+  }> {
+    const user = this.verifyOAuthPayload(payload);
+    if (!user) {
+      throw new UnauthorizedException("Telegram imzosi yaroqsiz — qaytadan kiring");
     }
 
     return this.upsertAndIssue({
@@ -230,5 +285,80 @@ export class MobileAuthService {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * TELEGRAM LOGIN WIDGET IMZOSINI TEKSHIRADI.
+   *
+   * Algoritm (Telegram Login spetsifikatsiyasi):
+   *   secret_key = SHA256(bot_token)          ← oddiy XESH
+   *   hash       = HMAC_SHA256(secret_key, data_check_string)
+   *
+   * ⚠️ `verifyInitData` DAN FARQI FAQAT BIRINCHI QATORDA, lekin u
+   * hal qiluvchi — yuqoridagi izohga qarang.
+   *
+   * ⚠️ MAYDONLAR TEKIS (`key=value`), `user` JSON EMAS: Login widget
+   * `id`, `first_name`, `username` ni ALOHIDA maydon qilib beradi.
+   */
+  private verifyOAuthPayload(payload: Record<string, unknown>): TelegramUser | null {
+    if (!env.botToken) {
+      this.logger.warn("BOT_TOKEN yo'q — Telegram Login tekshirib bo'lmaydi");
+      return null;
+    }
+
+    const hash = typeof payload.hash === "string" ? payload.hash : null;
+    if (!hash) return null;
+
+    // ── data_check_string ──────────────────────────────────────────
+    // ⚠️ `hash` DAN BOSHQA HAMMA maydon qatnashadi va alifbo
+    // tartibida. Bitta maydon tushib qolsa imzo mos kelmaydi.
+    const pairs: string[] = [];
+    for (const [key, value] of Object.entries(payload)) {
+      if (key === "hash" || value === undefined || value === null) continue;
+      pairs.push(`${key}=${String(value)}`);
+    }
+    pairs.sort();
+    const dataCheckString = pairs.join("\n");
+
+    const secretKey = createHash("sha256").update(env.botToken).digest();
+    const computed = createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+
+    // ⚠️ DOIMIY VAQTLI TAQQOSLASH.
+    let a: Buffer;
+    let b: Buffer;
+    try {
+      a = Buffer.from(computed, "hex");
+      b = Buffer.from(hash, "hex");
+    } catch {
+      return null;
+    }
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      return null;
+    }
+
+    // ── MUDDAT ──────────────────────────────────────────────────────
+    const authDate = Number.parseInt(String(payload.auth_date ?? ""), 10);
+    if (!Number.isFinite(authDate)) return null;
+
+    const ageSeconds = Math.floor(Date.now() / 1000) - authDate;
+    if (ageSeconds > OAUTH_MAX_AGE) {
+      this.logger.warn("Telegram Login imzosi muddati o'tgan");
+      return null;
+    }
+
+    const id = Number.parseInt(String(payload.id ?? ""), 10);
+    if (!Number.isFinite(id) || id <= 0) return null;
+
+    const str = (key: string): string | undefined =>
+      typeof payload[key] === "string" ? (payload[key] as string) : undefined;
+
+    return {
+      id,
+      first_name: str("first_name"),
+      last_name: str("last_name"),
+      username: str("username"),
+      photo_url: str("photo_url"),
+      language_code: str("language_code"),
+    };
   }
 }
