@@ -72,12 +72,22 @@ const page = (query: string): string => `<!DOCTYPE html>
     padding: 14px 28px; border-radius: 14px;
     font-size: 15px; font-weight: 600;
   }
+  /* Zaxira tugma — asosiysidan sokinroq. */
+  a.btn.alt {
+    background: transparent; color: #1d7a4d;
+    border: 1px solid #1d7a4d; padding: 12px 24px;
+    font-size: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    a.btn.alt { color: #2f9a66; border-color: #2f9a66; }
+  }
 </style>
 </head>
 <body>
   <h1 id="title">Ilovaga qaytilmoqda…</h1>
   <p class="hint" id="hint">Bir lahza kuting.</p>
   <a class="btn" id="open" style="display:none">Ilovani ochish</a>
+  <a class="btn alt" id="alt" style="display:none">Boshqa usulda ochish</a>
 
 <script>
 (function () {
@@ -141,29 +151,57 @@ const page = (query: string): string => `<!DOCTYPE html>
   }
 
   var link = "${APP_SCHEME}://auth?" + query;
+
+  /*
+   * ANDROID UCHUN "intent://" ZAXIRA YO'LI.
+   *
+   * Chrome oddiy maxsus sxemani (vshtabi://) ba'zan JIM
+   * e'tiborsiz qoldiradi — ayniqsa o'tish foydalanuvchi
+   * bosishidan kelib chiqmagan bo'lsa. "intent://" esa
+   * AYNAN shu holat uchun mo'ljallangan rasmiy mexanizm va
+   * u ustma-ust ishlaydi: ilova bo'lsa ochadi, bo'lmasa
+   * "browser_fallback_url" ga tushadi.
+   *
+   * S.browser_fallback_url BERILMAYDI: bo'lmasa Chrome shu
+   * sahifada qoladi va fuqaro tugmani qayta bosa oladi.
+   */
+  var intentLink =
+    "intent://auth?" + query +
+    "#Intent;scheme=${APP_SCHEME};package=uz.mysrv.nazoratchi;end";
+
+  var isAndroid = /android/i.test(navigator.userAgent);
+  var primary = isAndroid ? intentLink : link;
+
   var button = document.getElementById("open");
-  button.href = link;
+  button.href = primary;
 
   // Ilovani darhol uyg'otishga urinish.
-  window.location.href = link;
+  window.location.href = primary;
 
   /*
    * ⚠️ TUGMA DARHOL KO'RSATILADI (800 ms), kutilmaydi:
-   * Chrome FOYDALANUVCHI BOSMAGAN maxsus sxemali
-   * (vshtabi://) o'tishni BLOKLAYDI — bu himoya chorasi va
-   * yuqoridagi avtomatik urinish ba'zi qurilmalarda jimgina
-   * e'tiborsiz qoldiriladi.
-   *
-   * O'shanda ekran "qaytilmoqda…" holatida abadiy qotib
-   * qolardi va fuqaroda hech qanday chiqish yo'li yo'q edi.
-   * Tugma esa BOSILGAN o'tish bo'lgani uchun har doim
-   * ishlaydi.
+   * Chrome FOYDALANUVCHI BOSMAGAN o'tishni bloklashi mumkin
+   * va o'shanda ekran "qaytilmoqda…" holatida abadiy qotib
+   * qolardi — fuqaroda esa hech qanday chiqish yo'li yo'q edi.
+   * Tugma BOSILGAN o'tish bo'lgani uchun ishonchliroq.
    */
   setTimeout(function () {
     document.getElementById("title").textContent = "Ilovaga qaytish";
     document.getElementById("hint").textContent =
       "Agar ilova o'zi ochilmagan bo'lsa, quyidagi tugmani bosing.";
     button.style.display = "inline-block";
+
+    /*
+     * ⚠️ IKKINCHI TUGMA — oddiy sxema bilan: ba'zi qurilmalarda
+     * (Xiaomi/MIUI, Huawei) "intent://" cheklangan, boshqalarida
+     * esa aksincha oddiy sxema ishlamaydi. Ikkalasini ham berish
+     * — eng ishonchli yo'l.
+     */
+    var alt = document.getElementById("alt");
+    if (isAndroid) {
+      alt.href = link;
+      alt.style.display = "inline-block";
+    }
   }, 800);
 })();
 </script>
