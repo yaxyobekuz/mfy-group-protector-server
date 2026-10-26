@@ -81,7 +81,57 @@ const page = (query: string): string => `<!DOCTYPE html>
 
 <script>
 (function () {
+  /*
+   * TELEGRAM MA'LUMOTNI IKKI XIL KO'RINISHDA QAYTARADI va
+   * ikkalasi ham qo'llab-quvvatlanishi SHART:
+   *
+   *   1) #tgAuthResult=<base64 JSON>   <-- ODATDAGI YO'L
+   *      {"id":..,"first_name":..,"hash":..} base64 ga o'ralgan
+   *      va FRAGMENTDA (#) keladi.
+   *
+   *   2) ?id=..&hash=..                <-- ba'zi widget versiyalari
+   *
+   * FRAGMENT SERVERGA UMUMAN YUBORILMAYDI (brauzer uni
+   * jo'natmaydi) - shuning uchun uni FAQAT shu yerda, mijoz
+   * tomonida o'qish mumkin. Server tomonidagi query esa
+   * ikkinchi holat uchun zaxira bo'lib qoladi.
+   */
   var query = ${JSON.stringify(query)};
+
+  var hash = window.location.hash || "";
+  var marker = "tgAuthResult=";
+  var at = hash.indexOf(marker);
+
+  if (at !== -1) {
+    try {
+      var raw = hash.slice(at + marker.length);
+      // Fragmentdagi keyingi parametrlarni kesib tashlaymiz.
+      var amp = raw.indexOf("&");
+      if (amp !== -1) raw = raw.slice(0, amp);
+
+      // ⚠️ base64url → base64: Telegram - va _ ishlatishi
+      // mumkin va atob ularni tushunmay yiqilardi.
+      var b64 = decodeURIComponent(raw).replace(/-/g, "+").replace(/_/g, "/");
+      while (b64.length % 4) b64 += "=";
+
+      var data = JSON.parse(atob(b64));
+
+      /*
+       * ⚠️ MAYDONLAR O'ZGARTIRILMAY, BARCHASI uzatiladi: imzo
+       * (hash) ular ustidan hisoblangan va bittasi tushib
+       * qolsa yoki qo'shilsa, server imzoni tasdiqlay olmasdi.
+       */
+      var parts = [];
+      for (var key in data) {
+        if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
+        if (data[key] === null || data[key] === undefined) continue;
+        parts.push(encodeURIComponent(key) + "=" + encodeURIComponent(data[key]));
+      }
+      if (parts.length) query = parts.join("&");
+    } catch (e) {
+      /* Format kutilmagan — pastdagi xato matni ko'rsatiladi. */
+    }
+  }
 
   if (!query) {
     document.getElementById("title").textContent = "Kirish ma'lumotlari topilmadi";
@@ -98,18 +148,23 @@ const page = (query: string): string => `<!DOCTYPE html>
   window.location.href = link;
 
   /*
-   * ⚠️ 2 SONIYADAN KEYIN QO'LDA TUGMA: deep link ishlaganda
-   * bu sahifa fonda qoladi va taymer ahamiyatsiz. Ishlamasa
-   * (ilova o'rnatilmagan yoki brauzer bloklagan) — fuqaroda
-   * chiqish yo'li bo'ladi, aks holda u abadiy
-   * "qaytilmoqda…" ekranida qolardi.
+   * ⚠️ TUGMA DARHOL KO'RSATILADI (800 ms), kutilmaydi:
+   * Chrome FOYDALANUVCHI BOSMAGAN maxsus sxemali
+   * (vshtabi://) o'tishni BLOKLAYDI — bu himoya chorasi va
+   * yuqoridagi avtomatik urinish ba'zi qurilmalarda jimgina
+   * e'tiborsiz qoldiriladi.
+   *
+   * O'shanda ekran "qaytilmoqda…" holatida abadiy qotib
+   * qolardi va fuqaroda hech qanday chiqish yo'li yo'q edi.
+   * Tugma esa BOSILGAN o'tish bo'lgani uchun har doim
+   * ishlaydi.
    */
   setTimeout(function () {
     document.getElementById("title").textContent = "Ilovaga qaytish";
     document.getElementById("hint").textContent =
-      "Ilova o'zi ochilmadi. Quyidagi tugmani bosing.";
+      "Agar ilova o'zi ochilmagan bo'lsa, quyidagi tugmani bosing.";
     button.style.display = "inline-block";
-  }, 2000);
+  }, 800);
 })();
 </script>
 </body>
