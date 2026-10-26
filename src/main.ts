@@ -55,17 +55,45 @@ async function bootstrap(): Promise<void> {
   // bazada emas (`uploads.service.ts`).
   app.useStaticAssets(UPLOADS_DIR, { prefix: "/uploads" });
 
-  // ⚠️ `credentials: true` + ANIQ MANZIL. `*` ishlatilmaydi:
-  // brauzer `*` + credentials birikmasini RAD ETADI va xato faqat
-  // brauzer konsolida ko'rinib, server logida jim qolardi.
-  //
-  // ⚠️ MINI APP MANZILI QO'SHILADI: ilova proksi rejimida bir xil
-  // manzildan kelsa CORS kerak emas, lekin to'g'ridan-to'g'ri
-  // ulanishda (dev) kerak.
+  /**
+   * ⚠️ `credentials: true` + ANIQ MANZIL. `*` ishlatilmaydi:
+   * brauzer `*` + credentials birikmasini RAD ETADI va xato faqat
+   * brauzer konsolida ko'rinib, server logida jim qolardi.
+   *
+   * ⚠️ MINI APP MANZILI QO'SHILADI: ilova proksi rejimida bir xil
+   * manzildan kelsa CORS kerak emas, lekin to'g'ridan-to'g'ri
+   * ulanishda (dev) kerak.
+   *
+   * ── MUSTAQIL ILOVA (APK) MANZILLARI ─────────────────────────────
+   *
+   * ⚠️ CAPACITOR ILOVASI `https://localhost` DAN KELADI (Android)
+   * yoki `capacitor://localhost` (iOS) — bu WebView ichidagi
+   * O'RNATILGAN manzil, ya'ni haqiqiy sayt emas.
+   *
+   * Ular ro'yxatda bo'lmasa, APK ichidagi HAR SO'ROV brauzer
+   * tomonidan CORS bilan BLOKLANADI. Xato esa faqat WebView
+   * konsolida ko'rinadi va server logida UMUMAN qolmaydi
+   * (so'rov serverga yetib keladi, javob esa brauzerda
+   * tashlanadi) — shuning uchun uni topish juda qiyin:
+   * tashqaridan "ilova javob bermayapti" bo'lib ko'rinadi.
+   *
+   * ⚠️ KODDA, SOZLAMADA EMAS: bu manzillar Capacitor'ning
+   * o'zgarmas qiymatlari (`capacitor.config.ts#androidScheme`
+   * bilan bog'liq) va ularni `.env` ga chiqarish har deployda
+   * unutilishi mumkin bo'lgan yana bitta qadam bo'lardi.
+   */
+  const NATIVE_APP_ORIGINS = [
+    "https://localhost", // Android (androidScheme: "https")
+    "http://localhost", // Android (androidScheme: "http")
+    "capacitor://localhost", // iOS
+  ];
+
   app.enableCors({
-    origin: env.mobileAppUrl
-      ? [...env.corsOrigins, env.mobileAppUrl]
-      : env.corsOrigins,
+    origin: [
+      ...env.corsOrigins,
+      ...(env.mobileAppUrl ? [env.mobileAppUrl] : []),
+      ...NATIVE_APP_ORIGINS,
+    ],
     credentials: true,
     exposedHeaders: ["X-Total-Count"],
   });
