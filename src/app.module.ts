@@ -29,6 +29,9 @@ import { IssuesModule } from "./modules/issues/issues.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { SettingsModule } from "./modules/settings/settings.module";
 import { AuditModule } from "./modules/audit/audit.module";
+import { MobileModule } from "./modules/mobile/mobile.module";
+import { AnnouncementsModule } from "./modules/announcements/announcements.module";
+import { CitizensModule } from "./modules/citizens/citizens.module";
 
 @Module({
   imports: [
@@ -46,6 +49,9 @@ import { AuditModule } from "./modules/audit/audit.module";
     ReportsModule,
     SettingsModule,
     AuditModule,
+    MobileModule,
+    AnnouncementsModule,
+    CitizensModule,
   ],
   providers: [
     AuditService,

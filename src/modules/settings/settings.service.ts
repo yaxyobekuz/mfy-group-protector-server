@@ -94,6 +94,14 @@ export class SettingsService {
         ...(dto.guardAllowedHosts !== undefined
           ? { guardAllowedHosts: normalizeHosts(dto.guardAllowedHosts) }
           : {}),
+
+        // ── MINI APP ────────────────────────────────────────────
+        ...(dto.mobileDailyLimit !== undefined
+          ? { mobileDailyLimit: dto.mobileDailyLimit }
+          : {}),
+        ...(dto.mobileMaxAttachments !== undefined
+          ? { mobileMaxAttachments: dto.mobileMaxAttachments }
+          : {}),
         updatedBy: userId,
       },
     });

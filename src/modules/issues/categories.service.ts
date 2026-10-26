@@ -38,6 +38,11 @@ export class CategoriesService {
       name: category.name,
       color: category.color,
       description: category.description,
+      // ⚠️ ILOVA MAYDONLARI: ilova (`/mobile/categories`) shu uchta
+      // maydonni o'qiydi — belgi, javob muddati, mas'ul tashkilot.
+      icon: category.icon,
+      slaHours: category.slaHours,
+      orgName: category.orgName,
       sortOrder: category.sortOrder,
       isActive: category.isActive,
       issueCount: category._count.issues,
@@ -50,6 +55,9 @@ export class CategoriesService {
         name: dto.name.trim(),
         color: dto.color?.trim() || null,
         description: dto.description?.trim() || null,
+        icon: dto.icon?.trim() || null,
+        slaHours: dto.slaHours ?? 72,
+        orgName: dto.orgName?.trim() || null,
         sortOrder: dto.sortOrder ?? 0,
       },
     });
@@ -77,6 +85,9 @@ export class CategoriesService {
         ...(dto.description !== undefined
           ? { description: dto.description?.trim() || null }
           : {}),
+        ...(dto.icon !== undefined ? { icon: dto.icon?.trim() || null } : {}),
+        ...(dto.slaHours !== undefined ? { slaHours: dto.slaHours } : {}),
+        ...(dto.orgName !== undefined ? { orgName: dto.orgName?.trim() || null } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
       },

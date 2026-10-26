@@ -113,8 +113,32 @@ export const env = {
    */
   botApiKey: required("BOT_API_KEY"),
 
-  /** Serverdan botga xabar yuborish uchun. Bo'lmasa javob yuborilmaydi. */
+  /**
+   * Serverdan botga/fuqaroga xabar yuborish uchun. Bo'lmasa javob
+   * yuborilmaydi. Mini App'da `initData` imzosini tekshirish ham SHU
+   * token bilan (Telegram WebApp spetsifikatsiyasi).
+   */
   botToken: optional("BOT_TOKEN"),
+
+  /**
+   * MINI APP (FUQARO MUROJAATLARI).
+   *
+   * ⚠️ `mobileJwtSecret` — UCHINCHI ALOHIDA SIR (JWT access/refresh dan
+   * ham, bir-biridan ham alohida). Fuqaro tokeni shu bilan imzolanadi:
+   * `typ` tekshiruvi tushib qolsa ham fuqaro tokeni panelga KIRA
+   * OLMAYDI, chunki xodim tokeni boshqa sir bilan imzolangan.
+   *
+   * ⚠️ MAJBURIY: Mini App yoqilgan bo'lsa fuqaro umuman kira olmaydi va
+   * buni ishga tushishda bilish kerak.
+   */
+  mobileJwtSecret: required("MOBILE_JWT_SECRET"),
+  mobileJwtTtl: (process.env.MOBILE_JWT_TTL?.trim() || "30d") as JwtTtl,
+
+  /**
+   * Mini App manzili — bot menyu tugmasi (`setChatMenuButton`) va CORS
+   * uchun. Bo'sh bo'lsa menyu tugmasi qo'yilmaydi (tizim ishlaydi).
+   */
+  mobileAppUrl: optional("MOBILE_APP_URL"),
 
   timezone: process.env.TIMEZONE?.trim() || "Asia/Tashkent",
 } as const;

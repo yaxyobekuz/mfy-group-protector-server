@@ -84,4 +84,17 @@ export class UpdateSettingsDto {
     message: "guardAllowedHosts faqat domen bo'lishi kerak (masalan: gov.uz)",
   })
   guardAllowedHosts?: string[];
+
+  // ── MINI APP (FUQARO MUROJAATLARI) ───────────────────────────────
+
+  /**
+   * ⚠️ `0` — CHEKSIZ. Chegara — BLOK EMAS: xato ishlatayotgan odamni
+   * sekinlatadi. Yuqori chegara ham bor (100), aks holda "cheksizga
+   * yaqin" qiymat chegaraning ma'nosini yo'qotardi.
+   */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100)
+  mobileDailyLimit?: number;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10)
+  mobileMaxAttachments?: number;
 }

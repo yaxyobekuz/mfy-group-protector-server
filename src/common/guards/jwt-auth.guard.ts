@@ -20,7 +20,13 @@ import type { Request } from "express";
 
 import { env } from "../../config/env.config";
 import { PrismaService } from "../../prisma/prisma.service";
-import { BOT_ONLY_KEY, IS_PUBLIC_KEY, type RequestUser } from "../decorators";
+import {
+  BOT_ONLY_KEY,
+  CITIZEN_ONLY_KEY,
+  IS_PUBLIC_KEY,
+  type RequestCitizen,
+  type RequestUser,
+} from "../decorators";
 
 /** Access token ichidagi ma'lumot. */
 interface AccessPayload {
@@ -33,6 +39,17 @@ interface AccessPayload {
    * bu IKKINCHI himoya qatlami.
    */
   typ: "access";
+}
+
+/** Fuqaro (Mini App) tokeni ichidagi ma'lumot. */
+interface CitizenPayload {
+  sub: string;
+  /**
+   * ⚠️ `typ` + ALOHIDA SIR: fuqaro tokeni xodim yo'liga tushib qolsa
+   * ham imzo boshqa sir bilan tekshirilgani uchun o'tmaydi, va `typ`
+   * teskari tomonda ikkinchi to'siq.
+   */
+  typ: "citizen";
 }
 
 @Injectable()
@@ -55,6 +72,11 @@ export class JwtAuthGuard implements CanActivate {
     // ── BOT YO'LI ───────────────────────────────────────────────────
     if (this.reflector.getAllAndOverride<boolean>(BOT_ONLY_KEY, handler)) {
       return this.checkBotKey(request);
+    }
+
+    // ── FUQARO YO'LI (Mini App) ─────────────────────────────────────
+    if (this.reflector.getAllAndOverride<boolean>(CITIZEN_ONLY_KEY, handler)) {
+      return this.checkCitizen(request);
     }
 
     // ── XODIM YO'LI ─────────────────────────────────────────────────
@@ -119,6 +141,61 @@ export class JwtAuthGuard implements CanActivate {
     };
 
     (request as Request & { user: RequestUser }).user = requestUser;
+    return true;
+  }
+
+  /**
+   * FUQARO TOKENINI TEKSHIRADI (Mini App).
+   *
+   * ⚠️ XODIM YO'LIDAN ALOHIDA SIR: `mobileJwtSecret` bilan tekshiriladi.
+   * ⚠️ `isBlocked` BAZADAN O'QILADI: bloklangan fuqaro token muddati
+   * tugamay turib ham darhol to'xtatilishi kerak — blok JUDA qattiq
+   * chora va u DARHOL kuchga kirishi shart.
+   */
+  private async checkCitizen(request: Request): Promise<boolean> {
+    const token = this.extractToken(request);
+    if (!token) {
+      throw new UnauthorizedException("Token yo'q");
+    }
+
+    let payload: CitizenPayload;
+    try {
+      payload = await this.jwt.verifyAsync<CitizenPayload>(token, {
+        secret: env.mobileJwtSecret,
+      });
+    } catch {
+      throw new UnauthorizedException("Token yaroqsiz");
+    }
+
+    if (payload.typ !== "citizen") {
+      throw new UnauthorizedException("Token turi mos emas");
+    }
+
+    const citizen = await this.prisma.citizen.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, telegramId: true, firstName: true, isBlocked: true, blockReason: true },
+    });
+
+    if (!citizen) {
+      throw new UnauthorizedException("Foydalanuvchi topilmadi");
+    }
+
+    if (citizen.isBlocked) {
+      // ⚠️ SABAB QAYTARILADI: fuqaroga ilovada ko'rsatiladi — "ilova
+      // ishlamayapti" degan noaniqlikdan ko'ra, aniq sabab yaxshiroq.
+      throw new ForbiddenException(
+        citizen.blockReason?.trim() || "Hisobingiz vaqtincha cheklangan",
+      );
+    }
+
+    const requestCitizen: RequestCitizen = {
+      id: citizen.id,
+      telegramId: citizen.telegramId,
+      firstName: citizen.firstName,
+      isBlocked: citizen.isBlocked,
+    };
+
+    (request as Request & { citizen: RequestCitizen }).citizen = requestCitizen;
     return true;
   }
 

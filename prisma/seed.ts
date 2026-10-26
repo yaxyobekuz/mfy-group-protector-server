@@ -39,14 +39,14 @@ const ARGON_OPTIONS: argon2.Options = {
  * topilmasdi.
  */
 const CATEGORIES = [
-  { name: "Kommunal xizmatlar", color: "#2563eb", description: "Suv, gaz, elektr, isitish", sortOrder: 10 },
-  { name: "Yo'l va infratuzilma", color: "#ea580c", description: "Yo'l, chiroq, quduq, transport", sortOrder: 20 },
-  { name: "Tozalik va ekologiya", color: "#16a34a", description: "Axlat, hovli, ko'kalamzorlashtirish", sortOrder: 30 },
-  { name: "Ijtimoiy yordam", color: "#9333ea", description: "Nafaqa, moddiy yordam, ro'yxat", sortOrder: 40 },
-  { name: "Xavfsizlik", color: "#dc2626", description: "Xavfli holat, tartib buzilishi", sortOrder: 50 },
-  { name: "Xodim faoliyati", color: "#c2410c", description: "MFY xodimlari ishi haqida", sortOrder: 60 },
-  { name: "Hujjat va ma'lumotnoma", color: "#0891b2", description: "Rasmiy hujjat olish masalalari", sortOrder: 70 },
-  { name: "Boshqa", color: "#64748b", description: "Yuqoridagilarga kirmaydigan murojaatlar", sortOrder: 100 },
+  { name: "Kommunal xizmatlar", color: "#2563eb", description: "Suv, gaz, elektr, isitish", sortOrder: 10, icon: "water", slaHours: 48, orgName: "Kommunal xizmat ko'rsatish bo'limi" },
+  { name: "Yo'l va infratuzilma", color: "#ea580c", description: "Yo'l, chiroq, quduq, transport", sortOrder: 20, icon: "road", slaHours: 72, orgName: "Obodonlashtirish boshqarmasi" },
+  { name: "Tozalik va ekologiya", color: "#16a34a", description: "Axlat, hovli, ko'kalamzorlashtirish", sortOrder: 30, icon: "trash", slaHours: 24, orgName: "Obodonlashtirish va chiqindi xizmatlari" },
+  { name: "Ijtimoiy yordam", color: "#9333ea", description: "Nafaqa, moddiy yordam, ro'yxat", sortOrder: 40, icon: "social", slaHours: 120, orgName: "Ijtimoiy himoya bo'limi" },
+  { name: "Xavfsizlik", color: "#dc2626", description: "Xavfli holat, tartib buzilishi", sortOrder: 50, icon: "shield", slaHours: 12, orgName: "Jamoat xavfsizligi bo'limi" },
+  { name: "Xodim faoliyati", color: "#c2410c", description: "MFY xodimlari ishi haqida", sortOrder: 60, icon: "staff", slaHours: 72 },
+  { name: "Hujjat va ma'lumotnoma", color: "#0891b2", description: "Rasmiy hujjat olish masalalari", sortOrder: 70, icon: "document", slaHours: 72 },
+  { name: "Boshqa", color: "#64748b", description: "Yuqoridagilarga kirmaydigan murojaatlar", sortOrder: 100, icon: "more", slaHours: 72 },
 ];
 
 async function main(): Promise<void> {

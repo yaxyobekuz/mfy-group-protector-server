@@ -34,6 +34,7 @@ import {
   type ScopeContext,
 } from "../../common/scope.util";
 import { paginate, type Paginated } from "../../common/dto/pagination.dto";
+import { POINTS } from "../../common/points";
 import {
   IssueSource,
   IssueStatus,
@@ -261,6 +262,7 @@ export class IssuesService {
           },
           assignee: { select: { id: true, firstName: true, lastName: true } },
           author: { select: { id: true, firstName: true, lastName: true } },
+          citizen: { select: { id: true, firstName: true, lastName: true } },
           _count: { select: { comments: true } },
         },
       }),
@@ -280,6 +282,14 @@ export class IssuesService {
       mahalla: issue.mahalla,
       assignee: issue.assignee,
       author: issue.author,
+      // ⚠️ MOBIL MUROJAATDA MUALLIF FUQARO: panel `source==="mobile"`
+      // da shuni ko'rsatadi.
+      citizen: issue.citizen
+        ? {
+            id: issue.citizen.id,
+            name: [issue.citizen.firstName, issue.citizen.lastName].filter(Boolean).join(" "),
+          }
+        : null,
       dueAt: issue.dueAt,
       // ⚠️ MUDDAT — MO'LJAL, MAJBURIYAT EMAS: tizim o'tganda hech
       // narsa qilmaydi, faqat panelda ajratib ko'rsatadi
@@ -312,13 +322,26 @@ export class IssuesService {
         },
         assignee: { select: { id: true, firstName: true, lastName: true } },
         author: { select: { id: true, firstName: true, lastName: true } },
+        // ⚠️ MOBIL MUROJAAT MUALLIFI — FUQARO (`citizenId`), xodim emas.
+        // Panel uni "Yuborgan" sifatida ko'rsatadi.
+        citizen: {
+          select: { id: true, firstName: true, lastName: true, username: true, phone: true, telegramId: true },
+        },
         reviewer: { select: { id: true, firstName: true, lastName: true } },
+        // Fuqaro yuborgan dalil fayllari.
+        attachments: {
+          select: { id: true, kind: true, path: true, mimeType: true, size: true },
+          orderBy: { createdAt: "asc" },
+        },
         signal: {
           select: { id: true, kind: true, severity: true, senderName: true, sentAt: true },
         },
         comments: {
           orderBy: { createdAt: "asc" },
-          include: { user: { select: { id: true, firstName: true, lastName: true } } },
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true } },
+            citizen: { select: { id: true, firstName: true, lastName: true } },
+          },
         },
       },
     });
@@ -445,7 +468,7 @@ export class IssuesService {
         reviewedBy: scope.userId,
         reviewedAt: new Date(),
       },
-      select: { id: true, publicNo: true, status: true, authorChatId: true, title: true },
+      select: { id: true, publicNo: true, status: true, title: true },
     });
 
     await this.audit.record({
@@ -458,14 +481,26 @@ export class IssuesService {
 
     // ⚠️ XABAR YUBORISH ASOSIY AMALDAN KEYIN VA UNI TO'XTATMAYDI:
     // Telegram yiqilsa muammo baribir yopilgan bo'lib qolishi kerak.
-    // `notify` ichida xato ushlanadi.
+    // `notify` ichida xato ushlanadi. Manzil `replyChatId` dan: botda
+    // chat, mobilda fuqaroning shaxsiy chati, signalda — null (ketmaydi).
     await this.notify.sendResolution({
-      chatId: updated.authorChatId,
+      chatId: this.replyChatId(issue),
       publicNo: updated.publicNo,
       title: updated.title,
       resolution: dto.resolution.trim(),
       rejected: Boolean(dto.rejected),
     });
+
+    // ⚠️ FUQAROGA HAL BO'LGANI UCHUN QO'SHIMCHA BALL — faqat HAL
+    // QILINGANDA (rad etilganda emas: `points.ts` "jazo emas" izohi).
+    if (!dto.rejected && issue.citizenId) {
+      await this.prisma.citizen
+        .update({
+          where: { id: issue.citizenId },
+          data: { points: { increment: POINTS.APPEAL_RESOLVED } },
+        })
+        .catch(() => undefined);
+    }
 
     return updated;
   }
@@ -527,10 +562,11 @@ export class IssuesService {
 
     // ⚠️ FAQAT `isPublic` IZOH TASHQARIGA KETADI. Standart `false`:
     // ichki muhokama ("bu odam har kuni yozadi") muallifga ketib
-    // qolmasligi kerak.
-    if (comment.isPublic && issue.authorChatId) {
+    // qolmasligi kerak. Manzil `replyChatId` dan (bot yoki mobil).
+    const replyChat = this.replyChatId(issue);
+    if (comment.isPublic && replyChat) {
       await this.notify.sendComment({
-        chatId: issue.authorChatId,
+        chatId: replyChat,
         publicNo: issue.publicNo,
         body: comment.body,
       });
@@ -552,6 +588,11 @@ export class IssuesService {
         assigneeId: true,
         mahallaId: true,
         authorChatId: true,
+        citizenId: true,
+        // ⚠️ MOBIL MUROJAATDA `authorChatId` NULL: javob fuqaroning
+        // SHAXSIY chatiga (`citizen.telegramId`) boradi. Manzilni bir
+        // joydan o'qiymiz — `replyChatId` ikkisidan mavjudini tanlaydi.
+        citizen: { select: { telegramId: true } },
         mahalla: { select: { districtId: true } },
       },
     });
@@ -560,6 +601,20 @@ export class IssuesService {
     this.assertScope(scope, issue.mahalla?.districtId ?? null, issue.mahallaId);
 
     return issue;
+  }
+
+  /**
+   * JAVOB QAYSI CHATGA KETADI.
+   *
+   * ⚠️ `authorChatId` (bot) YOKI `citizen.telegramId` (mobil) — IKKISI
+   * HECH QACHON BIRGA to'lmaydi. Signaldan kelganda ikkisi ham null:
+   * javob MFY guruhiga ketmaydi (bot kuzatuvchi).
+   */
+  private replyChatId(issue: {
+    authorChatId: string | null;
+    citizen: { telegramId: string } | null;
+  }): string | null {
+    return issue.authorChatId ?? issue.citizen?.telegramId ?? null;
   }
 
   /**
@@ -602,7 +657,7 @@ export class IssuesService {
    * `count` baribir xato yo'l — bir marta o'chirilsa raqamlar
    * takrorlanib ketardi.
    */
-  private async nextPublicNo(client: TxClient | PrismaService): Promise<string> {
+  async nextPublicNo(client: TxClient | PrismaService): Promise<string> {
     const last = await client.issue.findFirst({
       orderBy: { publicNo: "desc" },
       select: { publicNo: true },

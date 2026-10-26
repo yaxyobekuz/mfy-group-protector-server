@@ -103,8 +103,10 @@ model District {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  mahallas Mahalla[]
-  users    User[]
+  mahallas      Mahalla[]
+  users         User[]
+  citizens      Citizen[]
+  announcements Announcement[]
 
   @@index([isArchived, sortOrder])
   @@map("districts")
@@ -145,6 +147,7 @@ model Mahalla {
   district District        @relation(fields: [districtId], references: [id], onDelete: Restrict)
   groups   TelegramGroup[]
   issues   Issue[]
+  citizens Citizen[]
 
   @@index([districtId, isArchived, sortOrder])
   @@map("mahallas")
@@ -539,6 +542,12 @@ enum IssueSource {
   bot
   /// Panelda qo'lda yaratilgan.
   manual
+  /// Fuqaro Mini App orqali o'zi yuborgan.
+  ///
+  /// ⚠️ `signal` DAN FARQI: bu yerda "bu muammomi?" degan AI taxmini
+  /// YO'Q — fuqaro atayin yuborgan. Shuning uchun `group_signals`
+  /// bosqichidan o'tmaydi va to'g'ridan-to'g'ri rasmiy navbatga tushadi.
+  mobile
 }
 
 enum IssueStatus {
@@ -571,6 +580,26 @@ model IssueCategory {
   color String?
 
   description String?
+
+  /// ── ILOVA UCHUN QO'SHILGAN ──────────────────────────────────────
+  ///
+  /// ⚠️ ILOVAGA ALOHIDA TOIFA OCHILMAYDI: bu — `issue_categories` ning
+  /// O'ZI. Botdan va ilovadan kelgan murojaat bir xil yo'nalishga
+  /// tushadi. Ilova uchun qo'shilgani faqat ko'rinish/vaqt/tashkilot.
+  ///
+  /// ⚠️ `icon` — KALIT (SVG emas): `mobile/.../icons.tsx` va
+  /// `admin/.../category-icons.ts` dagi kalit. Tanilmagan kalit zahira
+  /// belgi beradi — toifa qo'shishni to'smaydi.
+  icon String?
+
+  /// Taxminiy javob muddati (soat) — ilovada "3 kun" deb ko'rsatiladi
+  /// (`slaLabel`). Muddat MAJBURIYAT EMAS, mo'ljal (`Issue.dueAt` bilan
+  /// ayni mantiq).
+  slaHours Int @default(72) @map("sla_hours")
+
+  /// Mas'ul tashkilot nomi — ilovada "Mas'ul tashkilot" qatorida.
+  /// Bo'sh bo'lsa ilova `Settings.orgName` ni ko'rsatadi.
+  orgName String? @map("org_name")
 
   sortOrder Int @default(0) @map("sort_order")
 
@@ -624,13 +653,37 @@ model Issue {
   /// nomi va xabar havolasi `sourceMeta` da qoladi.
   authorId String? @map("author_id")
 
+  /// ⚠️ FUQARO — XODIM EMAS. `authorId` TIZIM XODIMI (`User`), bu esa
+  /// Mini App'dan yuborgan FUQARO (`Citizen`). Ikkisi ALOHIDA ustun:
+  /// bir jadvalga qo'shilsa `permissions` butun aholiga tarqalardi.
+  /// Mobil murojaatda `authorId` null, `citizenId` to'ladi.
+  citizenId String? @map("citizen_id")
+
   /// Botdan kelgan bo'lsa — javob AYNAN SHU chatga qaytadi, keyin
   /// bog'lanish uzilsa ham.
   ///
-  /// ⚠️ SIGNALDAN KELGANDA ATAYLAB BO'SH: javob MFY guruhiga ketib
-  /// qolmasligi kerak — bot u yerda KUZATUVCHI va hech narsa
-  /// yozmasligi kerak.
+  /// ⚠️ SIGNALDAN VA MOBILDAN KELGANDA ATAYLAB BO'SH: javob MFY
+  /// guruhiga ketib qolmasligi kerak — bot u yerda KUZATUVCHI. Mobil
+  /// javob fuqaroning SHAXSIY chatiga boradi (`citizen.telegramId`),
+  /// manzil bir joyda saqlanadi.
   authorChatId String? @map("author_chat_id")
+
+  /// ── MOBIL MUROJAAT MAYDONLARI (manba `mobile` bo'lganda) ─────────
+  ///
+  /// Xaritada qadalgan nuqta (ixtiyoriy — suratsiz/joysiz ham murojaat
+  /// qabul qilinadi).
+  lat Float?
+  lng Float?
+  /// Fuqaro yozgan yoki xaritadan topilgan manzil matni.
+  address String?
+  /// Fuqaro belgilagan bayroqlar — TAXMIN, ustuvorlikni o'zgartirmaydi,
+  /// panelda faqat ko'rsatiladi (CLAUDE.md "Ustuvorlikni AI taklifi
+  /// o'zgartirmaydi" bilan ayni sabab).
+  isHazard       Boolean @default(false) @map("is_hazard")
+  isLongStanding Boolean @default(false) @map("is_long_standing")
+  isRepeatAppeal Boolean @default(false) @map("is_repeat_appeal")
+  /// Muammo qachon sodir bo'lgani (fuqaro ko'rsatsa).
+  occurredAt DateTime? @map("occurred_at")
 
   /// Manba haqida barcha ma'lumot: guruh nomi, yozgan odam, xabar
   /// havolasi, AI toifasi.
@@ -658,19 +711,64 @@ model Issue {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  category IssueCategory  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  mahalla  Mahalla?       @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
-  author   User?          @relation("IssueAuthor", fields: [authorId], references: [id], onDelete: SetNull)
-  assignee User?          @relation("IssueAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  reviewer User?          @relation("IssueReviewedBy", fields: [reviewedBy], references: [id], onDelete: SetNull)
-  comments IssueComment[]
-  signal   GroupSignal?
+  category    IssueCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  mahalla     Mahalla?          @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
+  author      User?             @relation("IssueAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  citizen     Citizen?          @relation(fields: [citizenId], references: [id], onDelete: SetNull)
+  assignee    User?             @relation("IssueAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  reviewer    User?             @relation("IssueReviewedBy", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  comments    IssueComment[]
+  attachments IssueAttachment[]
+  signal      GroupSignal?
 
   @@index([status, createdAt(sort: Desc)])
   @@index([mahallaId, status])
   @@index([categoryId, status])
   @@index([assigneeId, status])
+  @@index([citizenId, createdAt(sort: Desc)])
   @@map("issues")
+}
+
+/// MUROJAAT FAYLI — fuqaro yuborgan surat/video.
+///
+/// ⚠️ APPEND-ONLY: murojaat bilan BIRGAGINA o'chadi (`onDelete: Cascade`).
+/// Fuqaro "chiqindi uyumi" deb surat yuborgan, keyin surat yo'qolsa,
+/// murojaatning asosi qolmaydi — dalil, bezak emas.
+///
+/// ⚠️ FAYL DISKDA, bazada emas. `path` — diskdagi `randomUUID` nomi;
+/// asl nom (`originalName`) yo'l sifatida ISHLATILMAYDI (`../../.env`
+/// hujumi). Tur FAYL ICHIDAN aniqlangan (`uploads.service.ts`),
+/// `Content-Type` dan emas.
+model IssueAttachment {
+  id String @id @default(cuid())
+
+  issueId String @map("issue_id")
+
+  /// Baytlardan aniqlangan tur.
+  kind IssueAttachmentKind
+
+  /// Diskdagi nom (`randomUUID` + kengaytma), `/uploads/` ostida.
+  path String
+
+  /// Haqiqiy MIME (baytdan aniqlangan).
+  mimeType String @map("mime_type")
+  size     Int
+
+  /// Fuqaro qurilmasidagi asl nom — faqat ma'lumot uchun saqlanadi,
+  /// hech qachon yo'l sifatida ishlatilmaydi.
+  originalName String? @map("original_name")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@index([issueId, createdAt])
+  @@map("issue_attachments")
+}
+
+enum IssueAttachmentKind {
+  photo
+  video
 }
 
 /// MUAMMO YOZISHMASI — ichki izohlar.
@@ -682,18 +780,26 @@ model IssueComment {
   id String @id @default(cuid())
 
   issueId String @map("issue_id")
-  userId  String @map("user_id")
+
+  /// ⚠️ XODIM YOZSA `userId`, FUQARO YOZSA `citizenId` — IKKISIDAN BIRI.
+  /// Ikkisi ham `null` bo'lmasligi kerak (amaliy qoida; schema darajasida
+  /// majburlanmaydi). Fuqaro izohi ("qo'shimcha") ham ro'yxatga tushadi
+  /// va ma'muriyatга ko'rinadi.
+  userId    String? @map("user_id")
+  citizenId String? @map("citizen_id")
 
   body String
 
-  /// ⚠️ `true` bo'lsa izoh MUALLIFGA (botga) ham ketadi. Standart
-  /// `false`: ichki muhokama tashqariga chiqmasligi kerak.
+  /// ⚠️ `true` bo'lsa izoh MUALLIFGA (bot/fuqaroga) ham ketadi. Standart
+  /// `false`: ichki muhokama tashqariga chiqmasligi kerak. Fuqaroning
+  /// o'z izohi esa `true` bilan yoziladi.
   isPublic Boolean @default(false) @map("is_public")
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
-  user  User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  issue   Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  user    User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  citizen Citizen? @relation(fields: [citizenId], references: [id], onDelete: SetNull)
 
   @@index([issueId, createdAt])
   @@map("issue_comments")
@@ -769,6 +875,17 @@ model Settings {
   /// (`gov.uz`, `t.me`) hech qachon o'chirilmasligi kerak — MFY
   /// xodimi rasmiy havola tashlasa, bot uni yo'q qilib qo'ymasin.
   guardAllowedHosts String[] @default([]) @map("guard_allowed_hosts")
+
+  /// ── MINI APP (FUQARO MUROJAATLARI) ──────────────────────────────
+  ///
+  /// ⚠️ CHEGARA — BLOK EMAS. Kunlik murojaat soni limiti xato
+  /// ishlatayotgan odamni SEKINLATADI (`0` = cheksiz). `Citizen.isBlocked`
+  /// esa butunlay yopadi — bu alohida, qattiqroq chora. Chegara sababi
+  /// fuqaroga ko'rsatiladi.
+  mobileDailyLimit Int @default(0) @map("mobile_daily_limit")
+
+  /// Bitta murojaatga biriktiriladigan eng ko'p fayl.
+  mobileMaxAttachments Int @default(5) @map("mobile_max_attachments")
 
   updatedAt DateTime @updatedAt @map("updated_at")
   updatedBy String?  @map("updated_by")
@@ -912,4 +1029,100 @@ model SecurityEvent {
   @@index([kind, createdAt(sort: Desc)])
   @@index([senderTgId])
   @@map("security_events")
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  FUQARO (MINI APP) — XODIMDAN BUTUNLAY ALOHIDA
+// ══════════════════════════════════════════════════════════════════════
+
+/// FUQARO — Mini App orqali murojaat yuboradigan oddiy aholi.
+///
+/// ⚠️ `User` EMAS. `users` — tizim XODIMLARI: parol, ruxsat ro'yxati,
+/// hududiy qamrov, panelga kirish. Fuqaroda bularning HECH BIRI yo'q.
+/// Ikkisini bitta jadvalga qo'shish `permissions` ustunini butun
+/// aholiga tarqatardi — bitta xato standart qiymat o'nlab ming odamga
+/// panel ochib qo'yardi.
+///
+/// ⚠️ FUQARO TOKENI UCHINCHI ALOHIDA SIR bilan imzolanadi
+/// (`MOBILE_JWT_SECRET`): `typ` tekshiruvi tushib qolsa ham fuqaro
+/// tokeni panelga kira olmaydi.
+model Citizen {
+  id String @id @default(cuid())
+
+  /// Telegram foydalanuvchi id'si — kirish shu bo'yicha, va javob SHU
+  /// chatga boradi (shaxsiy chat).
+  telegramId String @unique @map("telegram_id")
+
+  /// ── TELEGRAM'DAN (har kirishda yangilanadi) ─────────────────────
+  firstName String  @map("first_name")
+  lastName  String? @map("last_name")
+  username  String?
+  photoUrl  String? @map("photo_url")
+
+  languageCode String @default("uz") @map("language_code")
+
+  /// ── FUQARONING O'ZI KIRITADIGAN ─────────────────────────────────
+  phone String?
+
+  /// Hudud — murojaatni to'g'ri MFY ga yo'naltirish va yangiliklarni
+  /// filtrlash uchun. Majburiy emas.
+  districtId String? @map("district_id")
+  mahallaId  String? @map("mahalla_id")
+
+  /// Faollik bali — reyting shundan (`common/points.ts` yagona manba).
+  points Int @default(0)
+
+  /// ⚠️ BLOK — CHEGARADAN QATTIQROQ CHORA. Butunlay yopadi. Shuning
+  /// uchun `citizens.manage` ruxsati operatorga BERILMAYDI. Sabab
+  /// MAJBURIY — fuqaroga ilovada ko'rsatiladi.
+  isBlocked   Boolean @default(false) @map("is_blocked")
+  blockReason String? @map("block_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  district District?      @relation(fields: [districtId], references: [id], onDelete: SetNull)
+  mahalla  Mahalla?       @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
+  issues   Issue[]
+  comments IssueComment[]
+
+  @@index([points(sort: Desc)])
+  @@index([districtId])
+  @@map("citizens")
+}
+
+/// YANGILIK / E'LON — ilovadagi "Yangiliklar" ro'yxati.
+///
+/// ⚠️ TUMAN BO'YICHA FILTRLANADI: `districtId` null bo'lsa — butun
+/// viloyat uchun; aks holda faqat shu tuman fuqarolariga ko'rinadi.
+model Announcement {
+  id String @id @default(cuid())
+
+  title String
+  body  String
+
+  /// Muqova surati — `/uploads/` ostidagi yo'l (ixtiyoriy).
+  coverPath String? @map("cover_path")
+
+  /// Yuqoriga qadab qo'yilgan e'lon ro'yxat boshida turadi.
+  isPinned Boolean @default(false) @map("is_pinned")
+
+  /// null = butun viloyat bo'yicha.
+  districtId String? @map("district_id")
+
+  /// `null` — qoralama (ilovada ko'rinmaydi). To'ldirilsa — nashr etilgan.
+  publishedAt DateTime? @map("published_at")
+
+  /// Ko'rish sanog'i — ko'rsatkich, hisobot emas ("ot va unut").
+  viewCount Int @default(0) @map("view_count")
+
+  createdBy String   @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  district District? @relation(fields: [districtId], references: [id], onDelete: SetNull)
+
+  @@index([publishedAt(sort: Desc)])
+  @@index([districtId, publishedAt(sort: Desc)])
+  @@map("announcements")
 }

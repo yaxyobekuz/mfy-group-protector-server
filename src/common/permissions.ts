@@ -117,6 +117,23 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     items: [{ key: "reports.view", label: "Hisobotlarni ko'rish" }],
   },
   {
+    key: "mobile",
+    label: "Fuqaro murojaatlari (ilova)",
+    items: [
+      { key: "citizens.view", label: "Fuqarolarni ko'rish" },
+      {
+        key: "citizens.manage",
+        label: "Fuqaroni bloklash/yechish",
+        hint: "Blok fuqaroni butunlay yopadi — qattiq chora. `security.guard` bilan ayni sabab: operatorga BERILMAYDI.",
+      },
+      {
+        key: "announcements.manage",
+        label: "Yangiliklarni boshqarish",
+        hint: "Ilovadagi 'Yangiliklar' ro'yxatini tahrirlash va nashr etish.",
+      },
+    ],
+  },
+  {
     key: "system",
     label: "Tizim",
     items: [
@@ -168,6 +185,9 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     "issues.comment",
     "territory.view",
     "reports.view",
+    // ⚠️ `citizens.manage` OPERATORDA YO'Q (blok — qattiq chora).
+    "citizens.view",
+    "announcements.manage",
   ],
   viewer: [
     "groups.view",
@@ -176,6 +196,7 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     "issues.view",
     "territory.view",
     "reports.view",
+    "citizens.view",
   ],
 };
 

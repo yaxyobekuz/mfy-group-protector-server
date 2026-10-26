@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   Length,
+  Max,
   MaxLength,
   Min,
 } from "class-validator";
@@ -92,6 +93,14 @@ export class CreateCategoryDto {
   @IsOptional() @IsString() @MaxLength(16) color?: string;
 
   @IsOptional() @IsString() @MaxLength(400) description?: string;
+
+  // ── ILOVA MAYDONLARI ──────────────────────────────────────────────
+  /** Belgi KALITI (`icons.tsx` / `category-icons.ts`) — SVG emas. */
+  @IsOptional() @IsString() @MaxLength(32) icon?: string;
+  /** Javob muddati (soat) — ilovada "3 kun" deb ko'rsatiladi. */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(2160) slaHours?: number;
+  @IsOptional() @IsString() @MaxLength(160) orgName?: string;
+
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) sortOrder?: number;
 }
 
@@ -99,6 +108,9 @@ export class UpdateCategoryDto {
   @IsOptional() @IsString() @Length(2, 80) name?: string;
   @IsOptional() @IsString() @MaxLength(16) color?: string;
   @IsOptional() @IsString() @MaxLength(400) description?: string;
+  @IsOptional() @IsString() @MaxLength(32) icon?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(2160) slaHours?: number;
+  @IsOptional() @IsString() @MaxLength(160) orgName?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) sortOrder?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }

@@ -46,6 +46,19 @@ export const BOT_ONLY_KEY = "botOnly";
  */
 export const BotOnly = () => SetMetadata(BOT_ONLY_KEY, true);
 
+export const CITIZEN_ONLY_KEY = "citizenOnly";
+
+/**
+ * FAQAT FUQARO KIRADIGAN ENDPOINT (Mini App tokeni bilan).
+ *
+ * ⚠️ FUQARO — XODIM EMAS. Bu endpoint'lar `request.user` ni EMAS,
+ * `request.citizen` ni to'ldiradi va `MOBILE_JWT_SECRET` bilan
+ * imzolangan tokenni talab qiladi. Shu tufayli ularga tasodifan
+ * `@RequirePermissions` qo'yilsa, `PermissionsGuard` `request.user`
+ * ni topolmay darhol 403 beradi — jim o'tib ketmaydi.
+ */
+export const CitizenOnly = () => SetMetadata(CITIZEN_ONLY_KEY, true);
+
 /** So'rov egasi — `JwtAuthGuard` joylashtiradi. */
 export interface RequestUser {
   id: string;
@@ -71,6 +84,30 @@ export const CurrentUser = createParamDecorator(
     const user = request.user;
     if (!user) return undefined;
     return data ? user[data] : user;
+  },
+);
+
+/** So'rov egasi FUQARO — `JwtAuthGuard` `@CitizenOnly()` yo'lida joylaydi. */
+export interface RequestCitizen {
+  id: string;
+  telegramId: string;
+  firstName: string;
+  isBlocked: boolean;
+}
+
+/**
+ * JORIY FUQARO.
+ *
+ * ⚠️ `CurrentUser` KO'ZGUSI, lekin `request.citizen` dan o'qiydi.
+ * Ma'lumot tokendan emas, BAZADAN keladi (`JwtAuthGuard`): bloklangan
+ * fuqaro token muddati tugamay turib ham darhol to'xtatilishi kerak.
+ */
+export const CurrentCitizen = createParamDecorator(
+  (data: keyof RequestCitizen | undefined, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest<{ citizen?: RequestCitizen }>();
+    const citizen = request.citizen;
+    if (!citizen) return undefined;
+    return data ? citizen[data] : citizen;
   },
 );
 
