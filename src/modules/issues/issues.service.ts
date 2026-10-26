@@ -310,7 +310,7 @@ export class IssuesService {
     const issue = await this.prisma.issue.findUnique({
       where: { id },
       include: {
-        category: { select: { id: true, name: true, color: true } },
+        category: { select: { id: true, name: true, color: true, icon: true } },
         mahalla: {
           select: {
             id: true,
