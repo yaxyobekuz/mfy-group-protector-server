@@ -35,7 +35,18 @@ async function bootstrap(): Promise<void> {
   // ularni boshqa domendan ko'rsatish KERAK.
   app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 
-  app.setGlobalPrefix("api");
+  /**
+   * ⚠️ `/auth/callback` PREFIKSDAN CHIQARILADI: Telegram kirishdan
+   * keyin aynan SHU manzilga qaytaradi (`return_to`) va u mustaqil
+   * ilovani `vshtabi://` deep link bilan uyg'otadi.
+   *
+   * Prefiksga kiritilsa manzil `/api/auth/callback` bo'lib qolardi
+   * va Telegram'dan qaytgan fuqaro 404 sahifada to'xtardi —
+   * kirish esa hech qachon tugallanmasdi.
+   */
+  app.setGlobalPrefix("api", {
+    exclude: ["/auth/callback"],
+  });
 
   // ── YUKLANGAN FAYLLAR ────────────────────────────────────────────
   //
