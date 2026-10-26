@@ -202,7 +202,9 @@ export class ReportsService {
 
     const categories = await this.prisma.issueCategory.findMany({
       where: { id: { in: rows.map((row) => row.categoryId) } },
-      select: { id: true, name: true, color: true },
+      // ⚠️ `icon` HAM: boshqaruv paneli yo'nalishlarni belgisi
+      // bilan ko'rsatadi (xarita va ilova bilan AYNI belgi).
+      select: { id: true, name: true, color: true, icon: true },
     });
     const byId = new Map(categories.map((category) => [category.id, category]));
 
@@ -211,6 +213,7 @@ export class ReportsService {
         categoryId: row.categoryId,
         name: byId.get(row.categoryId)?.name ?? "—",
         color: byId.get(row.categoryId)?.color ?? null,
+        icon: byId.get(row.categoryId)?.icon ?? null,
         count: row._count._all,
       }))
       .sort((a, b) => b.count - a.count);
