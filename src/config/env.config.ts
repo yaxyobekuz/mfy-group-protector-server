@@ -140,6 +140,27 @@ export const env = {
    */
   mobileAppUrl: optional("MOBILE_APP_URL"),
 
+  /**
+   * MOBIL ILOVA (Flutter) — GOOGLE BILAN KIRISH.
+   *
+   * ⚠️ BU — WEB TURIDAGI OAuth mijoz id'si, Android/iOS niki EMAS.
+   * `google_sign_in` ga `serverClientId` sifatida aynan shu beriladi
+   * va u qaytargan `id_token` ning `aud` maydoni SHU qiymatga teng
+   * bo'ladi. Android mijoz id'si yozilsa, imzo to'g'ri bo'lsa ham
+   * `aud` mos kelmay, kirish "yaroqsiz token" bilan rad etilardi.
+   *
+   * ⚠️ MAJBURIY EMAS: bo'lmasa Google kirishi O'CHADI (endpoint 503
+   * beradi), lekin mini-ilova (Telegram) ishlayveradi — ikki kirish
+   * yo'li bir-biriga bog'liq emas.
+   *
+   * ⚠️ iOS MIJOZ ID'SI ALOHIDA (`GOOGLE_IOS_CLIENT_ID`): iOS'da
+   * `google_sign_in` `aud` ni O'ZINING mijoz id'siga qo'yadi va
+   * yagona `aud` tekshiruvi iPhone'dan kirishni butunlay
+   * bloklardi.
+   */
+  googleClientId: optional("GOOGLE_CLIENT_ID"),
+  googleIosClientId: optional("GOOGLE_IOS_CLIENT_ID"),
+
   timezone: process.env.TIMEZONE?.trim() || "Asia/Tashkent",
 } as const;
 

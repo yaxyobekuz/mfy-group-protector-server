@@ -37,21 +37,24 @@ export class TelegramAuthDto {
 }
 
 /**
- * ⚠️ TELEGRAM LOGIN UCHUN DTO YO'Q VA BU ATAYLAB.
- *
- * Imzo (`hash`) Telegram YUBORGAN BARCHA maydonlar ustidan
- * hisoblanadi. Global `ValidationPipe` esa `whitelist: true` +
- * `forbidNonWhitelisted: true` bilan ishlaydi — ya'ni DTO'da
- * e'lon qilinmagan maydonni YO rad etadi, YO olib tashlaydi.
- *
- * Ikkalasi ham imzoni buzardi:
- *   — rad etilsa  → Telegram yangi maydon qo'shgan kuni kirish o'ladi;
- *   — tashlansa   → `data_check_string` to'liq bo'lmay, imzo mos kelmasdi.
- *
- * Shuning uchun u yo'l xom `Record` qabul qiladi va TEKSHIRUV
- * IMZONING O'ZIDA (`verifyOAuthPayload`) — u maydon nomlarini
- * emas, imzoni tekshiradi, ya'ni soxta maydon qo'shib bo'lmaydi.
+ * ⚠️ `initData` BITTA SATR SIFATIDA OLINADI, maydonlarga
+ * ajratilmaydi: imzo (`hash`) Telegram yuborgan XOM satr ustidan
+ * hisoblangan va uni qayta yig'ish tartibni yoki kodlashni
+ * o'zgartirib, imzoni buzardi.
  */
+
+/**
+ * GOOGLE BILAN KIRISH — MOBIL ILOVA (Flutter).
+ *
+ * ⚠️ FAQAT `idToken` KELADI. Ilova aytgan ism/pochta QABUL
+ * QILINMAYDI va olinmaydi: ular tokenning ICHIDA, Google imzosi
+ * ostida. Mijoz aytgan qiymatga ishonilsa, istalgan odam o'zini
+ * boshqa birov deb tanishtira olardi.
+ */
+export class GoogleAuthDto {
+  /** Google `id_token` (JWT) — `google_sign_in` beradi. */
+  @IsString() @MaxLength(4096) idToken!: string;
+}
 
 /** ⚠️ FAQAT DEV: server `NODE_ENV=production` da o'zi rad etadi. */
 export class DevAuthDto {

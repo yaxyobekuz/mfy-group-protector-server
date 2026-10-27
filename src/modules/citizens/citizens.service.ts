@@ -170,6 +170,12 @@ export class CitizensService {
     const recipients = await this.prisma.citizen.findMany({
       where: {
         isBlocked: false,
+        // ⚠️ TELEGRAM HISOBI BORLAR: mobil ilovadan (Google bilan)
+        // kirgan fuqaroda `telegramId` YO'Q va unga Telegram orqali
+        // xabar yuborib bo'lmaydi. Filtrsiz ular "failed" bo'lib
+        // sanalardi va panelda "yuborilmadi: 400" degan qo'rqinchli
+        // son chiqardi — aslida esa hech narsa buzilmagan.
+        telegramId: { not: null },
         ...(dto.districtId ? { districtId: dto.districtId } : {}),
       },
       select: { telegramId: true },
@@ -180,6 +186,7 @@ export class CitizensService {
     let failed = 0;
 
     for (const citizen of recipients) {
+      if (!citizen.telegramId) continue;
       const ok = await this.sendTelegram(citizen.telegramId, text);
       if (ok) sent += 1;
       else failed += 1;

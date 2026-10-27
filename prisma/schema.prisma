@@ -1049,11 +1049,36 @@ model SecurityEvent {
 model Citizen {
   id String @id @default(cuid())
 
-  /// Telegram foydalanuvchi id'si — kirish shu bo'yicha, va javob SHU
-  /// chatga boradi (shaxsiy chat).
-  telegramId String @unique @map("telegram_id")
+  /// ── FUQARO IKKI YO'L BILAN KIRADI ───────────────────────────────
+  ///
+  /// ⚠️ IKKI ILOVA, IKKI KIRISH: `mini-app` (Telegram ichidagi
+  /// mini-ilova) `initData` bilan kiradi va `telegramId` oladi;
+  /// `mobile` (Flutter, Play Market / App Store) Google bilan
+  /// kiradi va `googleId` oladi. Shuning uchun IKKALASI HAM
+  /// IXTIYORIY, lekin fuqaroda KAMIDA BITTASI bo'ladi
+  /// (`mobile-auth.service.ts` boshqa yo'l bilan yozmaydi).
+  ///
+  /// ⚠️ IKKISI BIR USTUNGA BIRLASHTIRILMAYDI: `telegramId` ayni
+  /// vaqtda JAVOB MANZILI ham (bot shu chatga yozadi). Umumiy
+  /// "externalId" bo'lsa, bot Google hisob raqamiga yozishga
+  /// urinardi va xato faqat ish vaqtida chiqardi.
 
-  /// ── TELEGRAM'DAN (har kirishda yangilanadi) ─────────────────────
+  /// Telegram foydalanuvchi id'si — mini-ilovadan kirganda. Javob SHU
+  /// chatga boradi (shaxsiy chat). Google bilan kirganda — `null`.
+  telegramId String? @unique @map("telegram_id")
+
+  /// Google hisobining doimiy id'si (`sub`) — mobil ilovadan kirganda.
+  ///
+  /// ⚠️ POCHTA EMAS, `sub` BO'YICHA TOPILADI: pochtani egasi
+  /// o'zgartirishi mumkin va o'shanda fuqaro hisobidan ajralib,
+  /// murojaatlari tarixi YO'QOLARDI. `sub` esa o'zgarmaydi.
+  googleId String? @unique @map("google_id")
+
+  /// Google hisobidagi pochta — faqat KO'RSATISH uchun (panelda
+  /// fuqaroni tanib olish). Kirish bo'yicha kalit EMAS.
+  email String?
+
+  /// ── TELEGRAM / GOOGLE'DAN (har kirishda yangilanadi) ────────────
   firstName String  @map("first_name")
   lastName  String? @map("last_name")
   username  String?

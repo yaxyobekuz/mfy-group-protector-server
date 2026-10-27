@@ -39,6 +39,7 @@ import {
   AppealListQuery,
   CreateAppealDto,
   DevAuthDto,
+  GoogleAuthDto,
   MapQuery,
   NewsQuery,
   RatingQuery,
@@ -62,21 +63,18 @@ export class MobileController {
   }
 
   /**
-   * TELEGRAM LOGIN — MUSTAQIL ILOVA (APK) UCHUN.
+   * GOOGLE — MOBIL ILOVA (Flutter) UCHUN.
    *
-   * ⚠️ XOM `Record` QABUL QILADI, DTO EMAS: global `ValidationPipe`
-   * (`whitelist` + `forbidNonWhitelisted`) e'lon qilinmagan maydonni
-   * olib tashlardi yoki rad etardi va imzo BUZILARDI. Sabab
-   * `dto/mobile.dto.ts` dagi izohda batafsil.
-   *
-   * ⚠️ XAVFSIZ: maydon nomlari emas, IMZO tekshiriladi — soxta
-   * maydon qo'shilsa imzo mos kelmaydi va kirish rad etiladi.
+   * ⚠️ MINI-ILOVA BU YO'LNI ISHLATMAYDI va aksincha ham: mini-ilova
+   * `auth/telegram` (yuqorida), mobil ilova faqat shu. Ikkalasi
+   * BIR-BIRIGA ZAXIRA EMAS — har ilova o'z muhitida mavjud bo'lgan
+   * yagona kirish yo'liga ega.
    */
   @Public()
-  @Post("auth/telegram-login")
+  @Post("auth/google")
   @HttpCode(200)
-  authTelegramLogin(@Body() payload: Record<string, unknown>) {
-    return this.auth.loginWithTelegramOAuth(payload ?? {});
+  authGoogle(@Body() dto: GoogleAuthDto) {
+    return this.auth.loginWithGoogle(dto.idToken);
   }
 
   @Public()

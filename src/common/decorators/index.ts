@@ -90,7 +90,13 @@ export const CurrentUser = createParamDecorator(
 /** So'rov egasi FUQARO — `JwtAuthGuard` `@CitizenOnly()` yo'lida joylaydi. */
 export interface RequestCitizen {
   id: string;
-  telegramId: string;
+  /**
+   * ⚠️ `null` BO'LISHI MUMKIN: mobil ilovadan (Google bilan) kirgan
+   * fuqaroda Telegram hisobi YO'Q. Shuning uchun bu maydonni
+   * "xabar yuborish manzili" deb qabul qiladigan kod uni ALBATTA
+   * tekshirishi kerak.
+   */
+  telegramId: string | null;
   firstName: string;
   isBlocked: boolean;
 }

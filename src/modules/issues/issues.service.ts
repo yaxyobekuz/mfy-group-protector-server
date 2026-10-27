@@ -606,13 +606,18 @@ export class IssuesService {
   /**
    * JAVOB QAYSI CHATGA KETADI.
    *
-   * ⚠️ `authorChatId` (bot) YOKI `citizen.telegramId` (mobil) — IKKISI
-   * HECH QACHON BIRGA to'lmaydi. Signaldan kelganda ikkisi ham null:
-   * javob MFY guruhiga ketmaydi (bot kuzatuvchi).
+   * ⚠️ `authorChatId` (bot) YOKI `citizen.telegramId` (mini-ilova) —
+   * IKKISI HECH QACHON BIRGA to'lmaydi. Signaldan kelganda ikkisi ham
+   * null: javob MFY guruhiga ketmaydi (bot kuzatuvchi).
+   *
+   * ⚠️ MOBIL ILOVADAN (Google) KELGAN MUROJAATDA IKKISI HAM `null`
+   * va bu XATO EMAS: o'sha fuqaroning Telegram hisobi yo'q, javobni
+   * u ilovaning O'ZIDA ko'radi ("Mening murojaatlarim"). Telegram
+   * xabari — qo'shimcha qulaylik, yagona yetkazish yo'li emas.
    */
   private replyChatId(issue: {
     authorChatId: string | null;
-    citizen: { telegramId: string } | null;
+    citizen: { telegramId: string | null } | null;
   }): string | null {
     return issue.authorChatId ?? issue.citizen?.telegramId ?? null;
   }
