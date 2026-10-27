@@ -25,10 +25,33 @@
  * sahifa maydonlarni faqat ILOVAGA UZATADI, token esa ilova
  * `POST /api/mobile/auth/telegram-login` orqali oladi — imzo
  * o'sha yerda tekshiriladi.
+ *
+ * ⚠️ CSP SHU YO'LDA ALOHIDA QO'YILADI (`nonce`). `main.ts` dagi
+ * `helmet()` standart holda `script-src 'self'` beradi va u
+ * SAHIFANING ICHKI SKRIPTINI BLOKLAYDI — ya'ni deep link
+ * umuman ishga tushmaydi. Buzilish JIM: uslublar (`style-src`
+ * da `'unsafe-inline'` bor) ishlayverdi, sahifa chiroyli
+ * ko'rindi va "Ilovaga qaytilmoqda…" da ABADIY qotib qoldi;
+ * zaxira tugmasi ham 800 ms da chiqmadi, chunki uni
+ * ko'rsatadigan kod ham o'sha bloklangan skript ichida.
+ * Server logida hech narsa yo'q edi — xato faqat brauzer
+ * konsolida ("Executing inline script violates ... CSP").
+ *
+ * Shuning uchun bu javobga O'Z CSP'si qo'yiladi: faqat shu
+ * `nonce` ga ega skript/uslub ishlaydi, qolgan hamma narsa
+ * taqiqlanadi (`default-src 'none'`). Ya'ni himoya
+ * BO'SHASHTIRILMAYDI — aksincha, sahifaga aniq moslanadi.
+ *
+ * ⚠️ `'unsafe-inline'` QO'YILMAYDI: `nonce` bilan birga u
+ * brauzer tomonidan E'TIBORSIZ qoldiriladi (spetsifikatsiya),
+ * ya'ni foyda bermaydi — faqat himoyani bo'shashtirgandek
+ * ko'rinib, chalg'itardi.
  */
 
-import { Controller, Get, Header, Req } from "@nestjs/common";
-import type { Request } from "express";
+import { randomBytes } from "node:crypto";
+
+import { Controller, Get, Header, Req, Res } from "@nestjs/common";
+import type { Request, Response } from "express";
 
 import { Public } from "../../common/decorators";
 
@@ -44,13 +67,13 @@ const APP_SCHEME = "vshtabi";
  * keladi va to'g'ridan-to'g'ri HTML'ga yozilsa, `<` belgisi
  * sahifani buzishi (yoki skript kiritilishi) mumkin edi.
  */
-const page = (query: string): string => `<!DOCTYPE html>
+const page = (query: string, nonce: string): string => `<!DOCTYPE html>
 <html lang="uz">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ilovaga qaytish</title>
-<style>
+<style nonce="${nonce}">
   :root { color-scheme: light dark; }
   body {
     margin: 0; min-height: 100vh;
@@ -89,7 +112,7 @@ const page = (query: string): string => `<!DOCTYPE html>
   <a class="btn" id="open" style="display:none">Ilovani ochish</a>
   <a class="btn alt" id="alt" style="display:none">Boshqa usulda ochish</a>
 
-<script>
+<script nonce="${nonce}">
 (function () {
   /*
    * TELEGRAM MA'LUMOTNI IKKI XIL KO'RINISHDA QAYTARADI va
@@ -220,12 +243,39 @@ export class AuthCallbackController {
   // ⚠️ KESHLANMAYDI: manzilda bir martalik imzo bor va u keshda
   // qolsa, keyingi kirishda ESKI imzo qaytarilardi.
   @Header("Cache-Control", "no-store")
-  callback(@Req() request: Request): string {
+  callback(
+    @Req() request: Request,
+    // ⚠️ `passthrough: true`: javobni Nest O'ZI yuboradi (quyida
+    // `return` bor). Usiz so'rov javobsiz osilib qolardi.
+    @Res({ passthrough: true }) response: Response,
+  ): string {
+    /**
+     * ⚠️ HAR SO'ROVGA YANGI `nonce`. Qotib qolgan qiymat CSP ni
+     * ma'nosiz qilardi: uni bilgan har qanday skript ishga
+     * tushaverardi.
+     */
+    const nonce = randomBytes(16).toString("base64");
+
+    // ⚠️ `helmet()` QO'YGAN SARLAVHA USTIGA YOZILADI (yuqoridagi
+    // izohga qarang): standart `script-src 'self'` bu sahifaning
+    // ichki skriptini bloklaydi va kirish tugallanmaydi.
+    response.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'none'",
+        `script-src 'nonce-${nonce}'`,
+        `style-src 'nonce-${nonce}'`,
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+      ].join("; "),
+    );
+
     // ⚠️ XOM SATR OLINADI (`originalUrl` dan), Nest'ning
     // tahlil qilingan `query` obyektidan EMAS: imzo maydonlar
     // ustidan hisoblangan va qayta yig'ilganda tartib yoki
     // kodlash o'zgarib, imzo buzilishi mumkin edi.
     const index = request.originalUrl.indexOf("?");
-    return page(index === -1 ? "" : request.originalUrl.slice(index + 1));
+    return page(index === -1 ? "" : request.originalUrl.slice(index + 1), nonce);
   }
 }
