@@ -28,7 +28,13 @@ import {
   type ScopeContext,
 } from "../../common/scope.util";
 import { TASHKENT_OFFSET_MINUTES, tashkentDayStart } from "../../common/date.util";
-import { IssueSource, IssueStatus, type Prisma } from "@prisma/client";
+import {
+  IssueSource,
+  IssueStatus,
+  SignalSeverity,
+  SignalStatus,
+  type Prisma,
+} from "@prisma/client";
 import type { ReportQuery } from "./dto/reports.dto";
 
 const CLOSED: IssueStatus[] = [IssueStatus.resolved, IssueStatus.rejected];
@@ -506,6 +512,269 @@ export class ReportsService {
    * boshidagi izoh. Bu yerda qamrov ham, vaqt oynasi ham, panel
    * filtrlari ham birga.
    */
+  /**
+   * TUMANLAR KESIMI — XARITA UCHUN ("qaysi tumanda nima bo'lyapti").
+   *
+   * ⚠️ UCH OQIM BIR SO'ROVDA, LEKIN QO'SHILMAYDI: muammo, signal va
+   * xavfsizlik hodisasi har biri ALOHIDA raqam bo'lib qaytadi.
+   * Ularni bitta "muammolilik" soniga qo'shish doktrinani buzardi —
+   * signal AI TAXMINI, muammo RASMIY FAKT, xavfsizlik hodisasi esa
+   * QAT'IY QOIDA natijasi. Bitta songa aylantirilsa, xaritadagi
+   * rang nimani bildirishini hech kim ayta olmasdi.
+   *
+   * ⚠️ HAR OQIM O'Z QAMROV FUNKSIYASI BILAN: muammo `Issue.mahallaId`
+   * (MUHRLANGAN) bo'yicha, signal va xavfsizlik esa GURUH orqali
+   * (jonli) — `scope.util.ts` dagi ayni ajratish. Bitta filtrni
+   * hammasiga qo'llash signalni ham "muhrlangan" deb ko'rsatardi.
+   *
+   * ⚠️ ARXIVLANGAN TUMAN HAM QAYTADI (bayrog'i bilan): uning o'tgan
+   * davrdagi murojaatlari tarixda qoladi va xaritadan yo'qolsa, jami
+   * raqam tumanlar yig'indisiga teng kelmasdi.
+   */
+  async byDistrictMap(scope: ScopeContext, query: ReportQuery) {
+    const issueWhere = this.baseWhere(scope, query);
+
+    /*
+     * ⚠️ SIGNAL/XAVFSIZLIK `categoryId` NI BILMAYDI — u faqat
+     * muammoda bor. Kategoriya tanlanganda ularni AYNI filtr bilan
+     * cheklab bo'lmaydi, cheklanmagan holda qoldirish esa
+     * "kategoriya tanladim, lekin signal soni o'zgarmadi" degan
+     * chalkashlik berardi. Shuning uchun ular NOL qaytadi va panel
+     * buni foydalanuvchiga AYTADI (`categoryFiltered`).
+     */
+    const categoryFiltered = Boolean(query.categoryId);
+
+    const period = {
+      ...(query.from ? { gte: new Date(query.from) } : {}),
+      ...(query.to
+        ? {
+            // ⚠️ KUN OXIRIGACHA (`security.service.ts` bilan ayni):
+            // aks holda oxirgi kun tushib qolardi.
+            lte: (() => {
+              const end = new Date(query.to);
+              end.setUTCHours(23, 59, 59, 999);
+              return end;
+            })(),
+          }
+        : {}),
+    };
+    const hasPeriod = Boolean(query.from || query.to);
+
+    const groupFilter = query.mahallaId
+      ? { group: { mahallaId: query.mahallaId } }
+      : query.districtId
+        ? { group: { mahalla: { districtId: query.districtId } } }
+        : {};
+
+    const signalWhere: Prisma.GroupSignalWhereInput = {
+      ...signalScopeWhere(scope, { includeUnassigned: isProvinceWide(scope) }),
+      ...(hasPeriod ? { createdAt: period } : {}),
+      ...groupFilter,
+    };
+
+    const securityWhere: Prisma.SecurityEventWhereInput = {
+      ...signalScopeWhere(scope, { includeUnassigned: true }),
+      ...(hasPeriod ? { createdAt: period } : {}),
+      ...groupFilter,
+    };
+
+    const now = new Date();
+
+    const [
+      districts,
+      issuesByMahalla,
+      overdueByMahalla,
+      resolvedRows,
+      signalRows,
+      securityRows,
+    ] = await Promise.all([
+      this.prisma.district.findMany({
+        orderBy: { sortOrder: "asc" },
+        select: { id: true, code: true, name: true, isArchived: true },
+      }),
+
+      this.prisma.issue.groupBy({
+        by: ["mahallaId", "status"],
+        where: issueWhere,
+        _count: { _all: true },
+      }),
+
+      this.prisma.issue.groupBy({
+        by: ["mahallaId"],
+        where: { ...issueWhere, dueAt: { lt: now }, status: { notIn: CLOSED } },
+        _count: { _all: true },
+      }),
+
+      /*
+       * ⚠️ O'RTACHA VAQT UCHUN XOM QATORLAR: Prisma `groupBy` ikki
+       * ustun AYIRMASI bo'yicha o'rtacha hisoblay olmaydi
+       * (`reviewedAt - createdAt`). To'plam yopilganlar bilan
+       * cheklangani uchun kichik qoladi.
+       */
+      this.prisma.issue.findMany({
+        where: { ...issueWhere, status: { in: CLOSED }, reviewedAt: { not: null } },
+        select: { mahallaId: true, createdAt: true, reviewedAt: true },
+      }),
+
+      categoryFiltered
+        ? Promise.resolve([])
+        : this.prisma.groupSignal.findMany({
+            where: signalWhere,
+            select: {
+              status: true,
+              severity: true,
+              group: { select: { mahalla: { select: { districtId: true } } } },
+            },
+          }),
+
+      categoryFiltered
+        ? Promise.resolve([])
+        : this.prisma.securityEvent.findMany({
+            where: securityWhere,
+            select: {
+              group: { select: { mahalla: { select: { districtId: true } } } },
+            },
+          }),
+    ]);
+
+    /* MFY → tuman: muammolar mahalla bo'yicha guruhlangan. */
+    const mahallaIds = new Set<string>();
+    for (const row of issuesByMahalla) if (row.mahallaId) mahallaIds.add(row.mahallaId);
+    for (const row of overdueByMahalla) if (row.mahallaId) mahallaIds.add(row.mahallaId);
+    for (const row of resolvedRows) if (row.mahallaId) mahallaIds.add(row.mahallaId);
+
+    const mahallas = mahallaIds.size
+      ? await this.prisma.mahalla.findMany({
+          where: { id: { in: [...mahallaIds] } },
+          select: { id: true, districtId: true },
+        })
+      : [];
+    const districtOfMahalla = new Map(mahallas.map((m) => [m.id, m.districtId]));
+
+    interface Bucket {
+      issues: number;
+      open: number;
+      inProgress: number;
+      resolved: number;
+      rejected: number;
+      overdue: number;
+      signals: number;
+      signalsNew: number;
+      signalsHigh: number;
+      security: number;
+      resolutionMs: number;
+      resolutionCount: number;
+    }
+
+    const empty = (): Bucket => ({
+      issues: 0,
+      open: 0,
+      inProgress: 0,
+      resolved: 0,
+      rejected: 0,
+      overdue: 0,
+      signals: 0,
+      signalsNew: 0,
+      signalsHigh: 0,
+      security: 0,
+      resolutionMs: 0,
+      resolutionCount: 0,
+    });
+
+    const buckets = new Map<string, Bucket>();
+    for (const district of districts) buckets.set(district.id, empty());
+
+    /*
+     * ⚠️ HUDUDI YO'Q YOZUVLAR ALOHIDA JAMLANADI, TASHLANMAYDI:
+     * ularning soni "MFY biriktirish ishi qoldi" degan signalning
+     * o'zi (`byTerritory` dagi ayni qaror). Xaritada ular hech
+     * qaysi tumanni bo'yamaydi, lekin raqam bo'lib ko'rinadi.
+     */
+    const unassigned = empty();
+    const bucketFor = (districtId: string | null | undefined): Bucket =>
+      districtId ? (buckets.get(districtId) ?? unassigned) : unassigned;
+
+    for (const row of issuesByMahalla) {
+      const bucket = bucketFor(
+        row.mahallaId ? districtOfMahalla.get(row.mahallaId) : null,
+      );
+      const count = row._count._all;
+      bucket.issues += count;
+      if (row.status === IssueStatus.new) {
+        bucket.open += count;
+      } else if (row.status === IssueStatus.in_progress) {
+        bucket.open += count;
+        bucket.inProgress += count;
+      } else if (row.status === IssueStatus.resolved) {
+        bucket.resolved += count;
+      } else if (row.status === IssueStatus.rejected) {
+        bucket.rejected += count;
+      }
+    }
+
+    for (const row of overdueByMahalla) {
+      bucketFor(row.mahallaId ? districtOfMahalla.get(row.mahallaId) : null).overdue +=
+        row._count._all;
+    }
+
+    for (const row of resolvedRows) {
+      const bucket = bucketFor(
+        row.mahallaId ? districtOfMahalla.get(row.mahallaId) : null,
+      );
+      bucket.resolutionMs += row.reviewedAt!.getTime() - row.createdAt.getTime();
+      bucket.resolutionCount += 1;
+    }
+
+    for (const row of signalRows) {
+      const bucket = bucketFor(row.group?.mahalla?.districtId ?? null);
+      bucket.signals += 1;
+      if (row.status === SignalStatus.new) bucket.signalsNew += 1;
+      if (row.severity === SignalSeverity.high) bucket.signalsHigh += 1;
+    }
+
+    for (const row of securityRows) {
+      bucketFor(row.group?.mahalla?.districtId ?? null).security += 1;
+    }
+
+    const toRow = (bucket: Bucket) => ({
+      issues: bucket.issues,
+      open: bucket.open,
+      inProgress: bucket.inProgress,
+      resolved: bucket.resolved,
+      rejected: bucket.rejected,
+      overdue: bucket.overdue,
+      signals: bucket.signals,
+      signalsNew: bucket.signalsNew,
+      signalsHigh: bucket.signalsHigh,
+      security: bucket.security,
+      avgResolutionHours:
+        bucket.resolutionCount > 0
+          ? Math.round((bucket.resolutionMs / bucket.resolutionCount / 3_600_000) * 10) /
+            10
+          : null,
+      resolutionRate:
+        bucket.issues > 0
+          ? Math.round((bucket.resolved / bucket.issues) * 1000) / 10
+          : null,
+    });
+
+    return {
+      /**
+       * ⚠️ KATEGORIYA FILTRI SIGNAL/XAVFSIZLIKKA TEGMAYDI va panel
+       * buni AYTISHI kerak — shuning uchun bayroq javobda.
+       */
+      categoryFiltered,
+      districts: districts.map((district) => ({
+        id: district.id,
+        code: district.code,
+        name: district.name,
+        isArchived: district.isArchived,
+        ...toRow(buckets.get(district.id)!),
+      })),
+      unassigned: toRow(unassigned),
+    };
+  }
+
   private baseWhere(scope: ScopeContext, query: ReportQuery): Prisma.IssueWhereInput {
     return {
       ...mahallaScopeWhere(scope, { includeUnassigned: isProvinceWide(scope) }),

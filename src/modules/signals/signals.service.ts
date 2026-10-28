@@ -212,7 +212,12 @@ export class SignalsService {
       ...(query.kind ? { kind: query.kind } : {}),
       ...(query.severity ? { severity: query.severity } : {}),
       ...(query.chatId ? { chatId: query.chatId } : {}),
-      ...(query.mahallaId ? { group: { mahallaId: query.mahallaId } } : {}),
+      /* ⚠️ `mahallaId` USTUN (issues bilan ayni mantiq). */
+      ...(query.mahallaId
+        ? { group: { mahallaId: query.mahallaId } }
+        : query.districtId
+          ? { group: { mahalla: { districtId: query.districtId } } }
+          : {}),
       ...(query.search
         ? { summary: { contains: query.search, mode: "insensitive" as const } }
         : {}),

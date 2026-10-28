@@ -49,6 +49,12 @@ export class ListIssuesQuery extends PaginationQuery {
   @IsOptional() @IsEnum(IssuePriority) priority?: IssuePriority;
   @IsOptional() @IsEnum(IssueSource) source?: IssueSource;
   @IsOptional() @IsString() categoryId?: string;
+  /**
+   * ⚠️ MFY EMAS, TUMAN: xaritadan "shu tumandagi murojaatlar" deb
+   * o'tilganda kerak. `mahallaId` bilan BIRGA kelsa, aniqrog'i
+   * (`mahallaId`) ustun turadi — service'da shunday.
+   */
+  @IsOptional() @IsString() districtId?: string;
   @IsOptional() @IsString() mahallaId?: string;
   @IsOptional() @IsString() assigneeId?: string;
   @IsOptional() @toBool() @IsBoolean() overdue?: boolean;

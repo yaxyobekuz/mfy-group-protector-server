@@ -230,7 +230,23 @@ export class IssuesService {
       ...(query.priority ? { priority: query.priority } : {}),
       ...(query.source ? { source: query.source } : {}),
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
-      ...(query.mahallaId ? { mahallaId: query.mahallaId } : {}),
+      /*
+       * TUMAN FILTRI — xaritadan o'tish uchun.
+       *
+       * ⚠️ `mahallaId` USTUN TURADI: ikkisi birga kelsa, aniqrog'i
+       * (MFY) tanlanadi. Ikkalasini ham qo'llash mumkin edi, lekin
+       * "boshqa tumandagi MFY" kombinatsiyasi BO'SH ro'yxat berib,
+       * foydalanuvchi sababini topa olmasdi.
+       *
+       * ⚠️ QAMROV USTIDAN O'TMAYDI: bu `where` ga QO'SHILADI
+       * (`mahallaScopeWhere` yuqorida) — tuman xodimi boshqa
+       * tumanni so'rasa ham AND sharti uni bo'sh qaytaradi.
+       */
+      ...(query.mahallaId
+        ? { mahallaId: query.mahallaId }
+        : query.districtId
+          ? { mahalla: { districtId: query.districtId } }
+          : {}),
       ...(query.assigneeId ? { assigneeId: query.assigneeId } : {}),
       // ⚠️ `overdue` — MUDDATI O'TGAN VA HALI YOPILMAGAN. Yopilgan
       // muammoning muddati o'tgani ahamiyatsiz: u allaqachon hal

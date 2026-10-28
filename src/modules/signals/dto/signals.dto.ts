@@ -26,6 +26,8 @@ export class ListSignalsQuery extends PaginationQuery {
   @IsOptional() @IsEnum(SignalKind) kind?: SignalKind;
   @IsOptional() @IsEnum(SignalSeverity) severity?: SignalSeverity;
   @IsOptional() @IsString() chatId?: string;
+  /** ⚠️ Xaritadan o'tish uchun — tuman kesimi (MFY orqali). */
+  @IsOptional() @IsString() districtId?: string;
   @IsOptional() @IsString() mahallaId?: string;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
 }

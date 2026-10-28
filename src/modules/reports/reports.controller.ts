@@ -58,6 +58,16 @@ export class ReportsController {
     return this.reports.mapPoints(toScope(user), query);
   }
 
+  /**
+   * TUMANLAR XARITASI — choropleth uchun bitta so'rovda uch oqim
+   * (muammo, signal, xavfsizlik) tuman kesimida.
+   */
+  @Get("district-map")
+  @RequirePermissions("reports.view")
+  districtMap(@CurrentUser() user: RequestUser, @Query() query: ReportQuery) {
+    return this.reports.byDistrictMap(toScope(user), query);
+  }
+
   @Get("daily")
   @RequirePermissions("reports.view")
   daily(@CurrentUser() user: RequestUser, @Query() query: DailyQuery) {
