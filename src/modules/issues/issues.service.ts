@@ -116,58 +116,6 @@ export class IssuesService {
     });
   }
 
-  /**
-   * BOTDAN YARATADI — xodim botdan qo'lda yubordi.
-   *
-   * ⚠️ `authorChatId` MUHRLANADI: javob AYNAN SHU chatga qaytadi,
-   * keyin bog'lanish uzilsa yoki o'sha telegramga boshqa hisob
-   * bog'langan bo'lsa ham. Jonli o'qilsa, javob boshqa odamga ketib
-   * qolishi mumkin edi.
-   *
-   * ⚠️ HUDUD XODIMNING TUMANIDAN OLINMAYDI: xodim boshqa tumandagi
-   * muammoni ham yuborishi mumkin (safarda ko'rdi). MFY ni botda
-   * tanlash esa o'nlab tugma bo'lardi, shuning uchun `mahallaId`
-   * bo'sh qoladi va panelda qo'lda qo'yiladi.
-   */
-  async createFromBot(input: {
-    categoryId: string;
-    authorId: string;
-    authorChatId: string;
-    title: string;
-    body: string;
-  }) {
-    const category = await this.prisma.issueCategory.findUnique({
-      where: { id: input.categoryId },
-      select: { id: true, isActive: true, name: true },
-    });
-    if (!category) throw new NotFoundException("Kategoriya topilmadi");
-    if (!category.isActive) throw new BadRequestException("Kategoriya faol emas");
-
-    const issue = await this.prisma.issue.create({
-      data: {
-        publicNo: await this.nextPublicNo(this.prisma),
-        categoryId: input.categoryId,
-        source: IssueSource.bot,
-        title: input.title,
-        body: input.body,
-        authorId: input.authorId,
-        authorChatId: input.authorChatId,
-        sourceMeta: { channel: "bot" },
-      },
-      select: { id: true, publicNo: true, title: true },
-    });
-
-    await this.audit.record({
-      userId: input.authorId,
-      action: "issue.create_bot",
-      entity: "Issue",
-      entityId: issue.id,
-      meta: { publicNo: issue.publicNo, category: category.name },
-    });
-
-    return issue;
-  }
-
   /** PANELDA QO'LDA YARATADI. */
   async create(dto: CreateIssueDto, scope: ScopeContext) {
     const category = await this.prisma.issueCategory.findUnique({

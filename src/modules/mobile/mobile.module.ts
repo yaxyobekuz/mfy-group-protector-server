@@ -3,6 +3,8 @@ import { JwtModule } from "@nestjs/jwt";
 
 import { IssuesModule } from "../issues/issues.module";
 import { UploadsModule } from "../uploads/uploads.module";
+import { BotCitizensController } from "./bot-citizens.controller";
+import { BotCitizensService } from "./bot-citizens.service";
 import { MobileAiService } from "./ai/mobile-ai.service";
 import { MobileAuthService } from "./mobile-auth.service";
 import { MobileController } from "./mobile.controller";
@@ -24,7 +26,11 @@ import { MobileService } from "./mobile.service";
   // Widget'dan qaytish sahifasi edi (`/auth/callback` → `vshtabi://`
   // deep link). Mobil ilova endi Google bilan kiradi va oradagi
   // brauzer ham, deep link ham YO'Q — sahifa kerak emas.
-  controllers: [MobileController],
-  providers: [MobileService, MobileAuthService, MobileAiService],
+  // ⚠️ `BotCitizensController` SHU MODULDA: u `MobileService` ning
+  // o'zini chaqiradi va murojaat mantig'i ikki joyda takrorlanmaydi.
+  // Fuqaro botdan ham, mini-ilovadan ham AYNI yo'l bilan murojaat
+  // yuboradi — faqat kirish usuli boshqacha.
+  controllers: [MobileController, BotCitizensController],
+  providers: [MobileService, MobileAuthService, MobileAiService, BotCitizensService],
 })
 export class MobileModule {}
