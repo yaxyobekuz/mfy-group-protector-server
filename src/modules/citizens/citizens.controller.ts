@@ -5,8 +5,21 @@ import {
   RequirePermissions,
   type RequestUser,
 } from "../../common/decorators";
+import type { ScopeContext } from "../../common/scope.util";
 import { CitizensService } from "./citizens.service";
-import { BlockCitizenDto, BroadcastDto, ListCitizensQuery } from "./dto/citizens.dto";
+import {
+  BlockCitizenDto,
+  BroadcastDto,
+  ListCitizensQuery,
+  RatingQuery,
+} from "./dto/citizens.dto";
+
+const toScope = (user: RequestUser): ScopeContext => ({
+  userId: user.id,
+  role: user.role,
+  scopeKind: user.scopeKind,
+  districtId: user.districtId,
+});
 
 @Controller("citizens")
 export class CitizensController {
@@ -16,6 +29,17 @@ export class CitizensController {
   @RequirePermissions("citizens.view")
   list(@Query() query: ListCitizensQuery) {
     return this.citizens.list(query);
+  }
+
+  /**
+   * ⚠️ `:id` DAN OLDIN TURISHI SHART: Nest marshrutlarni YOZILGAN
+   * TARTIBDA tekshiradi va pastda qolsa `GET /citizens/rating`
+   * "rating" ni id deb olib, 404 qaytarardi.
+   */
+  @Get("rating")
+  @RequirePermissions("citizens.view")
+  rating(@CurrentUser() user: RequestUser, @Query() query: RatingQuery) {
+    return this.citizens.rating(query, toScope(user));
   }
 
   @Get(":id")

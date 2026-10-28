@@ -16,7 +16,13 @@ import { env } from "../../config/env.config";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../../common/audit.service";
 import { paginate } from "../../common/dto/pagination.dto";
-import type { BlockCitizenDto, BroadcastDto, ListCitizensQuery } from "./dto/citizens.dto";
+import { districtScopeWhere, type ScopeContext } from "../../common/scope.util";
+import type {
+  BlockCitizenDto,
+  BroadcastDto,
+  ListCitizensQuery,
+  RatingQuery,
+} from "./dto/citizens.dto";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -112,6 +118,87 @@ export class CitizensService {
       blockReason: citizen.blockReason,
       createdAt: citizen.createdAt,
       stats: { total, open, resolved },
+    };
+  }
+
+  /**
+   * FAOL FUQAROLAR REYTINGI (panel).
+   *
+   * ⚠️ BALL "KIM KO'P YOZGAN" EMAS: yuborilganiga
+   * `POINTS.APPEAL_CREATED`, hal qilinganiga qo'shimcha
+   * `POINTS.APPEAL_RESOLVED` (`common/points.ts` — YAGONA MANBA).
+   * Shuning uchun bu yerda ball QAYTA HISOBLANMAYDI, faqat
+   * `Citizen.points` o'qiladi: ikkinchi formula qo'yilsa, ikkisi
+   * ajralib ketib, ilovada va panelda BOSHQA-BOSHQA o'rin
+   * ko'rsatilardi.
+   *
+   * ⚠️ ILOVADAGI REYTING BILAN AYNI RO'YXAT, lekin BOSHQA
+   * ENDPOINT: u fuqaro tokeni bilan ishlaydi (`/mobile/rating`) va
+   * qamrovni BILMAYDI. Bu yerda esa xodimning hududiy qamrovi
+   * QO'LLANADI — tuman xodimi butun viloyat ro'yxatini ko'rmaydi.
+   *
+   * ⚠️ BLOKLANGAN FUQARO RO'YXATDA YO'Q: reyting — RAG'BAT ro'yxati
+   * va bloklangan odam unda turishi "chora ko'rilgan" degan
+   * ma'lumotga zid bo'lardi.
+   */
+  async rating(query: RatingQuery, scope: ScopeContext) {
+    /*
+     * ⚠️ QAMROV VA FILTR BIRGA ISHLAYDI (AND), biri ikkinchisining
+     * o'rnini BOSMAYDI: tuman xodimi so'rovga boshqa tumanning
+     * `districtId` sini qo'lda yozsa, qamrov shartidan o'tolmay
+     * bo'sh ro'yxat oladi.
+     */
+    const where: Prisma.CitizenWhereInput = {
+      points: { gt: 0 },
+      isBlocked: false,
+      ...districtScopeWhere(scope),
+      ...(query.districtId ? { districtId: query.districtId } : {}),
+    };
+
+    const rows = await this.prisma.citizen.findMany({
+      where,
+      // ⚠️ IKKINCHI TARTIB (`createdAt`) MAJBURIY: ball teng
+      // bo'lganda Postgres tartibni kafolatlamaydi va har
+      // yangilashda o'rinlar sababsiz ALMASHIB turardi.
+      orderBy: [{ points: "desc" }, { createdAt: "asc" }],
+      take: query.limit,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        photoUrl: true,
+        points: true,
+        createdAt: true,
+        district: { select: { name: true } },
+        _count: { select: { issues: true } },
+      },
+    });
+
+    /*
+     * ⚠️ JAMI — RO'YXATDAN EMAS, BAZADAN: ro'yxat TOP-50 bilan
+     * cheklangan va uning yig'indisi "viloyatda nechta faol
+     * fuqaro bor" degan savolga NOTO'G'RI javob berardi.
+     */
+    const [totalActive, aggregate] = await Promise.all([
+      this.prisma.citizen.count({ where }),
+      this.prisma.citizen.aggregate({ where, _sum: { points: true } }),
+    ]);
+
+    return {
+      items: rows.map((c, index) => ({
+        rank: index + 1,
+        id: c.id,
+        name: [c.firstName, c.lastName].filter(Boolean).join(" "),
+        username: c.username,
+        photoUrl: c.photoUrl,
+        points: c.points,
+        appeals: c._count.issues,
+        districtName: c.district?.name ?? null,
+        createdAt: c.createdAt,
+      })),
+      totalActive,
+      totalPoints: aggregate._sum.points ?? 0,
     };
   }
 

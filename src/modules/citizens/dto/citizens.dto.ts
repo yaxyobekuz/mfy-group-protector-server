@@ -1,10 +1,13 @@
-import { Transform } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import {
   IsBoolean,
+  IsInt,
   IsOptional,
   IsString,
   Length,
+  Max,
   MaxLength,
+  Min,
 } from "class-validator";
 
 import { PaginationQuery } from "../../../common/dto/pagination.dto";
@@ -42,4 +45,26 @@ export class BroadcastDto {
    * Shuning uchun `citizens.manage` talab qilinadi va audit yoziladi.
    */
   @IsOptional() @IsString() districtId?: string;
+}
+
+/**
+ * REYTING SO'ROVI (panel).
+ *
+ * ⚠️ `limit` SAHIFALASHDAN EMAS: reyting — TOP ro'yxat, "keyingi
+ * sahifa" tugmasi unda ma'nosiz (401-o'rindagi fuqaroni hech kim
+ * qidirmaydi). Shuning uchun `PaginationQuery` MEROS OLINMAYDI va
+ * javob `Paginated` emas — oddiy ro'yxat.
+ */
+export const RATING_MAX_LIMIT = 200;
+
+export class RatingQuery {
+  /** Berilsa — faqat shu tuman fuqarolari (qamrov BILAN birga). */
+  @IsOptional() @IsString() districtId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(3)
+  @Max(RATING_MAX_LIMIT)
+  limit: number = 50;
 }
