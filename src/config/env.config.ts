@@ -12,6 +12,8 @@
  * so'rovda 500 qaytarishdan ko'ra yaxshi.
  */
 
+import { join, resolve } from "node:path";
+
 /** Majburiy satr — bo'sh bo'lsa startup to'xtaydi. */
 const required = (key: string): string => {
   const value = process.env[key]?.trim();
@@ -160,6 +162,25 @@ export const env = {
    */
   googleClientId: optional("GOOGLE_CLIENT_ID"),
   googleIosClientId: optional("GOOGLE_IOS_CLIENT_ID"),
+
+  /**
+   * YUKLANGAN FAYLLAR PAPKASI (murojaat dalillari).
+   *
+   * ⚠️ STANDART QIYMAT — `process.cwd()/uploads/appeals`, ya'ni LOYIHA
+   * KATALOGINING ICHIDA. Ishlab chiqishda qulay, lekin DEPLOY'DA
+   * XAVFLI: konteyner qayta qurilganda yoki kod yangi katalogga
+   * clone qilinganda papka kod bilan BIRGA ketadi va fayllar
+   * YO'QOLADI. Bazada esa faqat yo'l saqlanadi (`IssueAttachment`),
+   * ya'ni murojaat ko'rinib turadi, DALILI esa yo'q bo'ladi.
+   *
+   * ⚠️ ISHLAB CHIQARISHDA SHU O'ZGARUVCHI MAJBURIY QO'YILADI va
+   * qiymat kod katalogidan TASHQARIDA bo'lishi kerak (Docker'da —
+   * volume ulangan yo'l). "Fayl — dalil, bezak emas" qoidasi
+   * shunisiz saqlanmaydi.
+   */
+  uploadsDir: resolve(
+    optional("UPLOADS_DIR") ?? join(process.cwd(), "uploads", "appeals"),
+  ),
 
   timezone: process.env.TIMEZONE?.trim() || "Asia/Tashkent",
 } as const;

@@ -7,10 +7,17 @@
  * DALILGA tayanadi.
  */
 
-import { join } from "node:path";
+import { env } from "../../config/env.config";
 
-/** Diskdagi ildiz — `/uploads/` manzilidan shu papka ko'rsatiladi. */
-export const UPLOADS_DIR = join(process.cwd(), "uploads", "appeals");
+/**
+ * Diskdagi ildiz — `/uploads/` manzilidan shu papka ko'rsatiladi.
+ *
+ * ⚠️ YO'L `env.config.ts` DAN KELADI (`UPLOADS_DIR`), bu yerda
+ * QOTIRILMAYDI: standart qiymat loyiha katalogining ichiga tushadi va
+ * deploy paytida kod bilan BIRGA o'chib ketadi. Ishlab chiqarishda
+ * o'zgaruvchi kod katalogidan TASHQARIDAGI yo'lga qo'yiladi.
+ */
+export const UPLOADS_DIR = env.uploadsDir;
 
 /** Eng katta fayl hajmi (bayt). 25 MB — qisqa video ham sig'adi. */
 export const MAX_FILE_SIZE = 25 * 1024 * 1024;
