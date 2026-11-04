@@ -91,7 +91,13 @@ export class MobileAuthService {
    * yuklanishida emas. Shuning uchun Apple sozlanmagan bo'lsa ham
    * (`appleClientId` yo'q) bu qator zararsiz.
    */
-  private readonly appleJwks = createRemoteJWKSet(APPLE_JWKS_URL);
+  //
+  // ⚠️ `timeoutDuration` 15s (standart 5s): server Apple'dan uzoqda va
+  // birinchi yuklash sekin bo'lsa, 5s da `ERR_JWKS_TIMEOUT` chiqib,
+  // fuqaro "Apple hisobi tasdiqlanmadi" ko'rardi — aybi bo'lmasa ham.
+  private readonly appleJwks = createRemoteJWKSet(APPLE_JWKS_URL, {
+    timeoutDuration: 15_000,
+  });
 
   constructor(
     private readonly prisma: PrismaService,
@@ -277,10 +283,36 @@ export class MobileAuthService {
       });
       payload = result.payload;
     } catch (error) {
-      // ⚠️ SABAB LOGGA, FUQAROGA EMAS (Google bilan ayni): "aud
-      // mismatch" unga hech narsa aytmaydi, bizga esa kerak.
       this.logger.warn(`Apple identityToken tekshirilmadi: ${String(error)}`);
-      throw new UnauthorizedException("Apple hisobi tasdiqlanmadi — qaytadan kiring");
+
+      const code = (error as { code?: string }).code ?? "";
+      const claim = (error as { claim?: string }).claim;
+
+      /**
+       * ⚠️ TARMOQ XATOSI — 503, 401 EMAS: Apple kalitlari yuklanmadi,
+       * ya'ni token yaroqsiz EMAS, server Apple'ga yetolmadi. 401
+       * bo'lsa fuqaro hisobida muammo bor deb o'ylardi.
+       */
+      if (code === "ERR_JWKS_TIMEOUT" || !code) {
+        throw new ServiceUnavailableException(
+          "Apple bilan aloqa bo'lmadi — birozdan keyin qayta urinib ko'ring",
+        );
+      }
+
+      /**
+       * ⚠️ QISQA SABAB KODI FUQAROGA HAM KO'RSATILADI: u maxfiy emas
+       * ("aud", "expired"), lekin usiz telefondagi xatoni server
+       * logisiz tushunib bo'lmasdi. Token yoki kalit matni CHIQMAYDI.
+       */
+      const reason =
+        code === "ERR_JWT_EXPIRED"
+          ? "expired"
+          : code === "ERR_JWT_CLAIM_VALIDATION_FAILED"
+            ? (claim ?? "claim")
+            : code.replace(/^ERR_/, "").toLowerCase();
+      throw new UnauthorizedException(
+        `Apple hisobi tasdiqlanmadi — qaytadan kiring (${reason})`,
+      );
     }
 
     if (!payload.sub) {
