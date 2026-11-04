@@ -56,6 +56,22 @@ export class GoogleAuthDto {
   @IsString() @MaxLength(4096) idToken!: string;
 }
 
+/**
+ * "SIGN IN WITH APPLE" — MOBIL ILOVA (Flutter), FAQAT iOS.
+ *
+ * ⚠️ `GoogleAuthDto` BILAN AYNI MANTIQ: faqat `identityToken` keladi.
+ * Ilova aytgan ism/pochta QABUL QILINMAYDI — ular tokenning ICHIDA,
+ * Apple imzosi ostida. Mijoz aytgan qiymatga ishonilsa, istalgan odam
+ * o'zini boshqa birov deb tanishtira olardi.
+ *
+ * ⚠️ APPLE JWT'si Google'nikidan UZUNROQ bo'lishi mumkin (ko'proq
+ * claim) — shuning uchun chegara kengroq.
+ */
+export class AppleAuthDto {
+  /** Apple `identityToken` (JWT) — `sign_in_with_apple` beradi. */
+  @IsString() @MaxLength(6144) identityToken!: string;
+}
+
 /** ⚠️ FAQAT DEV: server `NODE_ENV=production` da o'zi rad etadi. */
 export class DevAuthDto {
   @IsString() @MaxLength(32) telegramId!: string;

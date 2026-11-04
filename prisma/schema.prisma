@@ -1074,8 +1074,27 @@ model Citizen {
   /// murojaatlari tarixi YO'QOLARDI. `sub` esa o'zgarmaydi.
   googleId String? @unique @map("google_id")
 
-  /// Google hisobidagi pochta — faqat KO'RSATISH uchun (panelda
+  /// Apple hisobining doimiy id'si (`sub`) — mobil ilovadan iOS'da
+  /// "Sign in with Apple" bilan kirganda.
+  ///
+  /// ⚠️ NEGA ALOHIDA USTUN — `googleId` GA QO'SHILMAYDI: App Store
+  /// qoidasi (4.8) iOS'da Google yonida maxfiylikni himoya qiluvchi
+  /// muqobil kirish talab qiladi va Apple aynan shu. U — UCHINCHI
+  /// kirish yo'li va "Uch kirish yo'li — bitta fuqaro" doktrinasiga
+  /// ko'ra ALOHIDA fuqaro bo'ladi: Apple pochtani yashirishi mumkin
+  /// (`privaterelay.appleid.com`), ya'ni Google bilan birlashtiradigan
+  /// ishonchli belgi YO'Q. Umumiy "externalId" bo'lsa, Apple `sub`
+  /// Google `sub` bilan to'qnashib, begona murojaatlar tarixi ochilib
+  /// ketardi.
+  ///
+  /// ⚠️ POCHTA EMAS, `sub` BO'YICHA TOPILADI (Google bilan ayni sabab).
+  appleId String? @unique @map("apple_id")
+
+  /// Google/Apple hisobidagi pochta — faqat KO'RSATISH uchun (panelda
   /// fuqaroni tanib olish). Kirish bo'yicha kalit EMAS.
+  ///
+  /// ⚠️ APPLE "yashirish" tanlasa, bu yerga xususiy relay manzili
+  /// (`...@privaterelay.appleid.com`) tushadi — bu NORMAL, xato emas.
   email String?
 
   /// ── TELEGRAM / GOOGLE'DAN (har kirishda yangilanadi) ────────────

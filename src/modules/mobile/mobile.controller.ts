@@ -37,6 +37,7 @@ import {
   AddAppealCommentDto,
   AnalyzeDto,
   AppealListQuery,
+  AppleAuthDto,
   CreateAppealDto,
   DevAuthDto,
   GoogleAuthDto,
@@ -75,6 +76,21 @@ export class MobileController {
   @HttpCode(200)
   authGoogle(@Body() dto: GoogleAuthDto) {
     return this.auth.loginWithGoogle(dto.idToken);
+  }
+
+  /**
+   * APPLE — MOBIL ILOVA (Flutter), FAQAT iOS.
+   *
+   * ⚠️ APP STORE QOIDASI 4.8 UCHUN: iOS'da Google yonida maxfiylikni
+   * himoya qiluvchi muqobil kirish shart. Android ishlatmaydi. Google
+   * (`auth/google`) bilan ayni ro'yxatda — har ilova o'z muhitida
+   * mavjud kirish yo'liga ega, ikkisi bir-biriga zaxira emas.
+   */
+  @Public()
+  @Post("auth/apple")
+  @HttpCode(200)
+  authApple(@Body() dto: AppleAuthDto) {
+    return this.auth.loginWithApple(dto.identityToken);
   }
 
   @Public()

@@ -29,6 +29,7 @@ import {
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { OAuth2Client, type TokenPayload } from "google-auth-library";
+import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 
 import { env } from "../../config/env.config";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -55,6 +56,15 @@ const INIT_DATA_MAX_AGE = 24 * 60 * 60;
  */
 const GOOGLE_ISSUERS = ["accounts.google.com", "https://accounts.google.com"];
 
+/**
+ * Apple `identityToken` ni kim chiqargan bo'lishi kerak — Google'dagi
+ * `GOOGLE_ISSUERS` bilan ayni rol. Apple uchun bitta qiymat.
+ */
+const APPLE_ISSUER = "https://appleid.apple.com";
+
+/** Apple'ning imzo kalitlari (JWKS) manzili. */
+const APPLE_JWKS_URL = new URL("https://appleid.apple.com/auth/keys");
+
 @Injectable()
 export class MobileAuthService {
   private readonly logger = new Logger(MobileAuthService.name);
@@ -66,6 +76,19 @@ export class MobileAuthService {
    * xizmati sekinlashganda kirish ham sekinlashardi.
    */
   private readonly googleClient = new OAuth2Client();
+
+  /**
+   * ⚠️ BITTA NUSXA, HAR SO'ROVDA YANGISI EMAS (Google mijozi bilan
+   * ayni sabab): `createRemoteJWKSet` Apple'ning imzo kalitlarini
+   * KESHLAYDI va ular aylanganda o'zi yangilaydi. Har kirishda yangi
+   * nusxa yaratilsa, har kirish Apple'ga qo'shimcha so'rov yuborardi.
+   *
+   * ⚠️ DANGASA EMAS, LEKIN TARMOQQA CHIQMAYDI: `createRemoteJWKSet`
+   * kalitlarni faqat BIRINCHI tekshiruvda yuklaydi — modul
+   * yuklanishida emas. Shuning uchun Apple sozlanmagan bo'lsa ham
+   * (`appleClientId` yo'q) bu qator zararsiz.
+   */
+  private readonly appleJwks = createRemoteJWKSet(APPLE_JWKS_URL);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -189,6 +212,102 @@ export class MobileAuthService {
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  //  APPLE (MOBIL ILOVA — Flutter, FAQAT iOS)
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * "SIGN IN WITH APPLE" — MOBIL ILOVA (App Store), FAQAT iOS.
+   *
+   * ── NIMA UCHUN BOR ────────────────────────────────────────────────
+   *
+   * ⚠️ APP STORE QOIDASI 4.8: iOS'da Google kabi uchinchi tomon kirishi
+   * ASOSIY bo'lsa, maxfiylikni himoya qiluvchi MUQOBIL kirish talab
+   * qilinadi. Apple aynan shu — usiz ilova do'konda RAD ETILADI.
+   * Android'da (Play Market) bu talab YO'Q, shuning uchun tugma faqat
+   * iOS'da ko'rsatiladi (`login_screen.dart`).
+   *
+   * ── GOOGLE BILAN AYNI, FARQLAR BELGILANGAN ────────────────────────
+   *
+   * ⚠️ `identityToken` — APPLE IMZOLAGAN JWT. `jose` uni Apple'ning
+   * ochiq kalitlari (JWKS) bilan tekshiradi, `aud` (kim uchun
+   * chiqarilgan) bizning bundle id'mizga (`APPLE_CLIENT_ID`) va `iss`
+   * Apple'ga tengligiga ishonch hosil qiladi — Google'dagi tekshiruv
+   * bilan AYNI himoya.
+   *
+   * ⚠️ `aud` = BUNDLE ID: `sign_in_with_apple` ilova ichidan kirganda
+   * Apple `aud` ni ilovaning bundle id'siga qo'yadi (veb-oqimdagi
+   * "Services ID" EMAS — bizda u yo'q). `env.config.ts` izohiga
+   * qarang.
+   *
+   * ⚠️ ISM/POCHTA FAQAT BIRINCHI KIRISHDA KELADI: Apple keyingi
+   * kirishlarda `id_token` ga ularni QO'SHMAYDI. Shuning uchun
+   * `nameIsFresh: false` — mavjud fuqaroning ismi o'chmaydi
+   * (`upsertAndIssue` izohiga qarang). Ilova birinchi kirishda ism/
+   * pochtani ALOHIDA beradi, lekin biz unga ISHONMAYMIZ: faqat
+   * imzolangan tokendan olinadi (Google bilan ayni sabab).
+   */
+  async loginWithApple(identityToken: string): Promise<{ token: string; citizen: unknown }> {
+    /**
+     * ⚠️ SOZLANMAGAN BO'LSA 503, 401 EMAS (Google bilan ayni sabab):
+     * bu fuqaroning aybi emas, SERVER sozlanmagani.
+     */
+    if (!env.appleClientId) {
+      this.logger.error("APPLE_CLIENT_ID yo'q — Apple kirishi o'chiq");
+      throw new ServiceUnavailableException(
+        "Apple orqali kirish hozircha sozlanmagan",
+      );
+    }
+
+    let payload: JWTPayload;
+
+    try {
+      // ⚠️ `jose` IMZO + `iss` + `aud` + MUDDATNI BIR O'ZI TEKSHIRADI.
+      // `kid` sarlavhadan olinib, mos kalit JWKS'dan tanlanadi.
+      const result = await jwtVerify(identityToken, this.appleJwks, {
+        issuer: APPLE_ISSUER,
+        audience: env.appleClientId,
+      });
+      payload = result.payload;
+    } catch (error) {
+      // ⚠️ SABAB LOGGA, FUQAROGA EMAS (Google bilan ayni): "aud
+      // mismatch" unga hech narsa aytmaydi, bizga esa kerak.
+      this.logger.warn(`Apple identityToken tekshirilmadi: ${String(error)}`);
+      throw new UnauthorizedException("Apple hisobi tasdiqlanmadi — qaytadan kiring");
+    }
+
+    if (!payload.sub) {
+      throw new UnauthorizedException("Apple hisobi tasdiqlanmadi — qaytadan kiring");
+    }
+
+    // ⚠️ POCHTA — FAQAT KO'RSATISH UCHUN, kalit EMAS (`sub` kalit).
+    // Apple "yashirish" tanlasa bu relay manzili bo'ladi — normal.
+    // `email` string sifatida kelishini tekshiramiz: Apple uni ba'zan
+    // JSON bool/string sifatida beradi va kutilmagan tur bazaga
+    // tushmasligi kerak.
+    const email =
+      typeof payload.email === "string" ? payload.email.trim().toLowerCase() || null : null;
+
+    return this.upsertAndIssue({
+      key: { appleId: payload.sub },
+      email,
+      // ⚠️ APPLE `id_token` DA ISM YO'Q — u faqat BIRINCHI kirishda,
+      // tokendan TASHQARI keladi va biz unga ishonmaymiz. Shuning
+      // uchun "Fuqaro" bilan yaratiladi; haqiqiy ismni fuqaro keyin
+      // o'zi kiritmaydi (ism Telegram/Google tushunchasi) — bu normal.
+      firstName: "Fuqaro",
+      lastName: null,
+      // ⚠️ `username` APPLE'DA YO'Q (Telegram tushunchasi) — Google
+      // bilan ayni.
+      username: null,
+      // ⚠️ APPLE RASM BERMAYDI.
+      photoUrl: null,
+      languageCode: "uz",
+      // ⚠️ ISM O'CHMASIN: izoh yuqorida va `upsertAndIssue` da.
+      nameIsFresh: false,
+    });
+  }
+
   /**
    * ⚠️ FAQAT DEV. Brauzerda `initData` yo'q va ishlab chiqishda sinash
    * uchun kerak. Server `production` da uni O'ZI rad etadi — frontend
@@ -237,24 +356,41 @@ export class MobileAuthService {
    * odamning murojaatlari tarixi ochilib ketardi.
    */
   private async upsertAndIssue(data: {
-    key: { telegramId: string } | { googleId: string };
+    key: { telegramId: string } | { googleId: string } | { appleId: string };
     firstName: string;
     lastName: string | null;
     username: string | null;
     photoUrl: string | null;
     languageCode: string;
     email?: string | null;
+    /**
+     * ⚠️ APPLE UCHUN `false`: Apple ism/familiyani FAQAT BIRINCHI
+     * kirishda beradi, keyingilarida YO'Q. O'shanda `firstName`
+     * "Fuqaro" bo'lib keladi va `true` bo'lsa, oldingi KIRISHDA
+     * saqlangan haqiqiy ismni o'chirib yuborardi. Shuning uchun Apple
+     * kirishida mavjud fuqaroning ismiga TEGILMAYDI (faqat `create`
+     * da yoziladi). Telegram/Google har kirishda haqiqiy ism beradi —
+     * ular uchun `true` (standart), eski xatti-harakat o'zgarmaydi.
+     */
+    nameIsFresh?: boolean;
   }): Promise<{ token: string; citizen: unknown }> {
+    const nameIsFresh = data.nameIsFresh ?? true;
+
     const citizen = await this.prisma.citizen.upsert({
       where: data.key,
       update: {
-        firstName: data.firstName,
-        lastName: data.lastName,
+        // ⚠️ ISM/FAMILIYA FAQAT MANBA ISHONCHLI BERGANDA YANGILANADI
+        // (`nameIsFresh`). Apple ikkinchi kirishda ism bermaydi —
+        // yuqoridagi izohga qarang.
+        ...(nameIsFresh
+          ? { firstName: data.firstName, lastName: data.lastName }
+          : {}),
         username: data.username,
         photoUrl: data.photoUrl,
         // ⚠️ POCHTA FAQAT KELGANDA YOZILADI: Telegram yo'li uni
-        // umuman bermaydi va `null` bilan ustiga yozilsa, Google
-        // bilan kirgan fuqaroning pochtasi o'chib ketardi.
+        // umuman bermaydi va `null` bilan ustiga yozilsa, Google/Apple
+        // bilan kirgan fuqaroning pochtasi o'chib ketardi. (Apple ham
+        // pochtani faqat birinchi kirishda beradi — ayni himoya.)
         ...(data.email !== undefined && data.email !== null ? { email: data.email } : {}),
       },
       create: {

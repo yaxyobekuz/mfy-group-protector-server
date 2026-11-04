@@ -164,6 +164,28 @@ export const env = {
   googleIosClientId: optional("GOOGLE_IOS_CLIENT_ID"),
 
   /**
+   * MOBIL ILOVA (Flutter) — iOS'da "SIGN IN WITH APPLE".
+   *
+   * ⚠️ NIMA UCHUN BOR: App Store qoidasi 4.8 iOS'da Google yonida
+   * maxfiylikni himoya qiluvchi muqobil kirish talab qiladi. Apple
+   * aynan shu — usiz ilova do'konda RAD ETILADI. Android'da (Play
+   * Market) talab EMAS, ya'ni bu kirish faqat iOS'da ko'rsatiladi.
+   *
+   * ⚠️ QIYMAT — iOS BUNDLE ID (`uz.mysrv.nazoratchi`). `sign_in_with_apple`
+   * ilova ichidan kirganda Apple `id_token` ning `aud` maydonini
+   * ilovaning bundle id'siga qo'yadi. (Faqat veb-oqimda `aud` Apple
+   * Developer'dagi "Services ID" bo'ladi — bizda u yo'q.) Server shu
+   * qiymatni `aud` sifatida kutadi: Google'dagi `aud` tekshiruvi bilan
+   * AYNI mantiq — boshqa ilova uchun chiqarilgan token qabul
+   * qilinmaydi.
+   *
+   * ⚠️ MAJBURIY EMAS: bo'lmasa Apple kirishi O'CHADI (endpoint 503
+   * beradi), Google va mini-ilova ishlayveradi — kirish yo'llari
+   * bir-biriga bog'liq emas.
+   */
+  appleClientId: optional("APPLE_CLIENT_ID"),
+
+  /**
    * YUKLANGAN FAYLLAR PAPKASI (murojaat dalillari).
    *
    * ⚠️ STANDART QIYMAT — `process.cwd()/uploads/appeals`, ya'ni LOYIHA
