@@ -44,15 +44,44 @@ export class UploadsService {
   /**
    * Faylni tekshiradi, saqlaydi va imzolangan havola qaytaradi.
    */
-  async save(file: {
-    buffer: Buffer;
-    size: number;
-    originalname?: string;
-  }): Promise<{ token: string; kind: AttachmentKind; url: string; size: number }> {
+  async save(
+    file: {
+      buffer: Buffer;
+      size: number;
+      originalname?: string;
+    },
+    /**
+     * RUXSAT ETILGAN TURLAR — chaqiruvchi cheklaydi.
+     *
+     * ⚠️ NIMA UCHUN KANALGA QARAB FARQ QILADI: mobil ilova FAQAT
+     * surat tanlaydi (`image_picker.pickImage`), ya'ni undan video
+     * kelishi mumkin emas — kelsa, bu ilova emas, QO'LDA yasalgan
+     * so'rov. Botda esa fuqaro Telegram'da videoni ATAYLAB yuboradi
+     * va u haqiqiy dalil bo'ladi.
+     *
+     * ⚠️ RO'YXAT TOR TOMONGA cheklanadi, keng tomonga EMAS: bu
+     * parametr `SIGNATURES` ga yangi tur QO'SHMAYDI, faqat
+     * mavjudlarining bir qismini tanlaydi. Shuning uchun uni
+     * noto'g'ri berib ro'yxatdan tashqari faylni o'tkazib
+     * yuborish imkoni yo'q.
+     *
+     * ⚠️ STANDART — IKKISI HAM: mavjud chaqiruvchilar (bot yo'li)
+     * o'zgarmaydi.
+     */
+    allowedKinds: readonly AttachmentKind[] = ["photo", "video"],
+  ): Promise<{ token: string; kind: AttachmentKind; url: string; size: number }> {
     if (!file?.buffer || file.size === 0) {
       throw new BadRequestException("Fayl bo'sh");
     }
 
+    /**
+     * ⚠️ HAJM IKKI JOYDA TEKSHIRILADI: `FileInterceptor` ning
+     * `limits.fileSize` si ham bor (`mobile.controller.ts`), lekin
+     * unga TAYANIB bo'lmaydi — u faqat HTTP yuklash yo'lida
+     * ishlaydi, bot yo'lida esa baytlar Telegram'dan keladi va
+     * interceptor umuman ishtirok etmaydi. HAQIQIY chegara SHU
+     * YERDA.
+     */
     if (file.size > MAX_FILE_SIZE) {
       throw new BadRequestException("Fayl juda katta (eng ko'pi 25 MB)");
     }
@@ -61,6 +90,17 @@ export class UploadsService {
     if (!signature) {
       throw new BadRequestException(
         "Fayl turi qo'llab-quvvatlanmaydi — faqat surat yoki video",
+      );
+    }
+
+    /**
+     * ⚠️ TUR BAYTDAN ANIQLANGANDAN KEYIN tekshiriladi, `Content-Type`
+     * dan EMAS: `.mp4` ni `image/jpeg` deb e'lon qilib yuborish bir
+     * qatorlik ish va o'shanda cheklov aylanib o'tilardi.
+     */
+    if (!allowedKinds.includes(signature.kind)) {
+      throw new BadRequestException(
+        "Bu yerda faqat surat yuborish mumkin",
       );
     }
 

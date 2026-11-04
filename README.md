@@ -257,3 +257,340 @@ muhitning locale'iga bog'liq bo'lib, bitta jadvalda "21-may, 2025" va
 ⚠️ `getHours()` ham ishlatilmaydi — u **serverning** zonasini beradi
 (konteynerda deyarli har doim UTC). Toshkent devor-soati `+5` qo'shib,
 `getUTC*` bilan o'qiladi.
+
+---
+
+# Do'konga chiqarish (App Store / Google Play)
+
+Mobil ilova (`uz.mysrv.nazoratchi`) shu serverning `/api/mobile/*`
+endpointlaridan foydalanadi. Do'konlar quyidagilarsiz ilovani **rad
+etadi** — har bir band talabning o'zi bilan izohlangan.
+
+## Hisobni o'chirish — MAJBURIY
+
+> Apple 5.1.1(v) · Google Play "Data deletion"
+
+```
+DELETE /api/mobile/me     @CitizenOnly()  →  204
+```
+
+Ilova ichida: **Profil → Hisobni o'chirish**. "Bizga yozing, qo'lda
+o'chiramiz" degan variant **qabul qilinmaydi**.
+
+**Nima bo'ladi** (bitta tranzaksiyada, `mobile.service.ts#deleteMe`):
+
+| | |
+|---|---|
+| Shaxsiy maydonlar | tozalanadi — `firstName` → `"O'chirilgan foydalanuvchi"`, qolgani `null` |
+| Kirish kalitlari | `telegramId` / `googleId` / `appleId` → **uchalasi** `null` |
+| Ball va hudud | `points: 0`, `districtId`/`mahallaId` → `null` |
+| `deletedAt` | qo'yiladi — qator **o'chirilmaydi** |
+| Murojaat/izoh/fayl | **QOLADI**, muallifi anonim |
+| Audit | `citizen.self_delete` (`userId: null` — amalni fuqaro qildi) |
+
+⚠️ **Murojaat ataylab saqlanadi**: u hisobot birligi. "Oy ichida nechta
+murojaat keldi" degan raqam bir odam hisobini o'chirgani uchun
+o'zgarib ketmasligi kerak (`Issue.source` muhrlangan bo'lgani bilan
+ayni sabab).
+
+⚠️ **Murojaat MATNI o'zgarmaydi** va unda fuqaro o'zi yozgan shaxsiy
+ma'lumot bo'lishi mumkin. Shu holat `/privacy` 6.2-bandida **aniq**
+yozilgan — yashirib qo'yish do'kon tekshiruvida ham, qonun oldida ham
+muammo bo'lardi.
+
+⚠️ **Eski token darhol o'ladi**: `JwtAuthGuard#checkCitizen` har
+so'rovda `deletedAt` ni **bazadan** tekshiradi. Mobil token 30 kunlik
+va refresh yo'q, ya'ni imzo jihatidan hali ham haqiqiy — faqat bazani
+tozalash yetarli emasdi.
+
+⚠️ **Qayta kirish → yangi, bo'sh fuqaro**: kalitlar tozalangani uchun
+`upsert` mos qator topmaydi. Eski murojaatlar tarixi qaytarilmaydi.
+
+### Apple ruxsatini bekor qilish
+
+Apple 5.1.1(v) Apple **tomonidagi** ruxsatni ham bekor qilishni talab
+qiladi. Oqim:
+
+```
+kirish    POST /api/mobile/auth/apple  { identityToken, authorizationCode? }
+             ↓ authorizationCode  →  appleid.apple.com/auth/token
+          refresh_token  →  SHIFRLANIB bazaga (`Citizen.appleRefreshToken`)
+
+o'chirish DELETE /api/mobile/me
+             ↓ ochiladi  →  appleid.apple.com/auth/revoke
+          logda: "Apple ruxsati bekor qilindi (/auth/revoke → 200)"
+```
+
+⚠️ **Token KIRISHDA olinadi, o'chirishda emas**: `authorizationCode`
+bir martalik va bir necha daqiqada so'nadi — o'chirish paytida (oylar
+keyin) uni almashtirib bo'lmaydi.
+
+⚠️ **`authorizationCode` IXTIYORIY**: eski ilova versiyasi uni
+yubormaydi va kirish baribir ishlaydi (faqat revoke o'tkazib
+yuboriladi). Majburiy qilinsa, do'konda turgan eski versiyadagi
+fuqarolar kirishdan uzilib qolardi.
+
+⚠️ **Revoke xatosi o'chirishni TO'XTATMAYDI**: aks holda Apple
+xizmati ishlamagan paytda fuqaro hisobini umuman o'chira olmasdi —
+ya'ni do'kon talabi **buzilardi**. Xato logga tushadi,
+`appleRevoked: false` esa auditda qoladi.
+
+⚠️ **`refresh_token` SHIFRLANGAN** (`common/secret-box.ts`,
+AES-256-GCM). U **tirik ruxsat**: o'qigan odam fuqaro nomidan Apple'dan
+yangi `id_token` olishi mumkin. Xom yozilsa, baza dump'i tarqalganda
+har bir iOS fuqaroning hisobi ochilib ketardi.
+
+## Ommaviy sahifalar
+
+`/api` prefiksidan **tashqarida** (`main.ts#setGlobalPrefix` istisnosi),
+tokensiz ochiladi — do'kon formasiga **aynan shu** manzillar yoziladi:
+
+| Manzil | Kim so'raydi |
+|---|---|
+| `/privacy` | App Store **va** Google Play |
+| `/terms` | App Store |
+| `/delete-account` | Google Play (ilovasiz ham ochilishi kerak) |
+
+Matnlar `server/public/` da (`legal.controller.ts` beradi).
+
+⚠️ **USLUB ALOHIDA FAYLDA** (`/legal.css`), sahifa ichida emas:
+`helmet` CSP ichki `<style>` blokini **bloklaydi** va sahifa bezaksiz
+ochilardi — xato esa faqat brauzer konsolida ko'rinib, server logida
+jim qolardi.
+
+⚠️ **`public/` `dist` GA NUSXALANMAYDI**: yo'l `process.cwd()` dan
+olinadi, ya'ni `src` dan ham, `dist` dan ham ayni papka topiladi.
+**Deploy'da `public/` ni kod bilan birga ko'chirish shart** — aks
+holda sahifalar 404 beradi va logda "public/ papkasi joyidami?" degan
+xato chiqadi.
+
+## Tezlik chegaralari
+
+Qiymatlar — `common/throttle.ts` (**yagona manba**).
+
+| Chegara | Daqiqada | Nima bo'yicha |
+|---|---|---|
+| global | 300 | token bo'lsa — id, yo'q bo'lsa — IP |
+| `auth/*` (fuqaro **va** xodim) | 10 | IP (token hali yo'q) |
+| `POST /mobile/uploads` | 30 | fuqaro |
+| `POST /mobile/appeals` | 10 | fuqaro |
+| `POST /mobile/appeals/analyze` | 8 | fuqaro |
+
+⚠️ **ID BO'YICHA, IP BO'YICHA EMAS** (`guards/throttler.guard.ts`):
+mobil operator NAT ortida o'nlab fuqaro **bitta** IP bilan chiqadi va
+IP bo'yicha cheklansa, qo'shnisi ilovadan foydalangani uchun boshqa
+odam 429 olardi. Teskarisi ham: Wi-Fi → mobil internet o'tishida IP
+o'zgaradi, ya'ni chegarani aylanib o'tish oson bo'lardi.
+
+⚠️ **GUARD TARTIBI**: `AppThrottlerGuard` `JwtAuthGuard` **dan keyin**
+turadi (`app.module.ts`) — u `request.citizen` ga tayanadi va oldinga
+qo'yilsa butun mantiq **jimgina** IP rejimiga tushardi.
+
+⚠️ **BOT CHEGARALANMAYDI** (`@BotOnly()` o'tkazib yuboriladi): butun
+MFY guruhlari yozishmasi bitta jarayondan, bitta IP bilan o'tadi va
+faol kunda global chegaraga urilardi — o'shanda guruh kuzatuvi va
+**xavfsizlik qalqoni** jimgina ishlamay qolardi. Bot yo'lining himoyasi
+— **kalit**, tezlik emas.
+
+⚠️ **XOTIRADA SANALADI**: PM2 `cluster` rejimida har nusxa **o'z**
+hisobini yuritadi va amaldagi chegara nusxalar soniga ko'payadi. Bitta
+nusxada (`fork`) ishlatilsa muammo yo'q; cluster kerak bo'lsa Redis
+saqlagichi qo'shiladi.
+
+⚠️ **`Settings.mobileDailyLimit` O'RNINI BOSMAYDI**: u "kunda nechta
+murojaat" degan **ma'muriy** qoida (sozlamadan), bu esa "daqiqada
+nechta so'rov" degan **texnik** himoya. Ikkisi birga ishlaydi.
+
+## Fayl yuklash
+
+- Tur **ichidagi baytlardan** aniqlanadi, `Content-Type` dan emas.
+- `POST /mobile/uploads` — **faqat surat**: ilova `pickImage` ishlatadi,
+  ya'ni undan video kelishi mumkin emas. Bot yo'li esa videoni qabul
+  qiladi (fuqaro Telegram'da ataylab yuboradi — haqiqiy dalil).
+- Hajm: `MAX_FILE_SIZE` = 25 MB, **ikki joyda** tekshiriladi
+  (`FileInterceptor` HTTP yo'lida, `UploadsService` esa har yo'lda —
+  bot baytlari Telegram'dan keladi va interceptor ishtirok etmaydi).
+
+⚠️ **`/uploads/*` HAVOLASI BOR HAR KIMGA OCHIQ**. Diskdagi nom
+`randomUUID()`, ya'ni taxmin qilib topib bo'lmaydi, lekin havolani
+bilgan odam ocha oladi. Bu holat `/privacy` 4-bandida **aniq**
+yozilgan. Imzolangan muddatli havolaga o'tish — keyingi qadam
+(`signed-ref.ts` naqshi allaqachon bor, lekin `useStaticAssets`
+o'rniga controller kerak bo'ladi).
+
+## API hujjati (Swagger)
+
+```
+development  →  /api/docs  OCHIQ (shartsiz)
+production   →  YOPIQ; ochish uchun SWAGGER_ENABLED=true + PAROL
+```
+
+⚠️ Parolsiz yoqilsa hujjat **ulanmaydi** va sabab logga chiqadi:
+"yoqdim, lekin parolni unutdim" holati ochiq hujjat bo'lib qolardi.
+Hujjat butun API tuzilmasini, DTO maydonlarini va ruxsat nomlarini
+oshkor qiladi.
+
+## Monitoring
+
+```
+GET /api/health  →  200 { status, database, latencyMs }  |  503
+```
+
+⚠️ **BAZA HAM TEKSHIRILADI** (`SELECT 1`), faqat "server javob berdi"
+emas: Nest baza uzilganda ham so'rovlarga javob beraveradi va o'shanda
+monitoring "hammasi yaxshi" deb ko'rsatardi — murojaat yuborish esa 500
+qaytarardi.
+
+⚠️ Nosozlikda **503**, 200 emas: monitoring **holat kodiga** qaraydi,
+javob ichidagi `"status": "down"` satriga emas.
+
+## Fuqaro boshqa fuqaroning kontentini KO'RMAYDI
+
+> Apple 1.2 (UGC shikoyat tizimi) — **hozircha talab emas**
+
+Har murojaat so'rovi `citizenId` bilan cheklangan
+(`mobile.service.ts`), ya'ni murojaat matni, surati, manzili va
+telefoni **faqat** egasiga va ma'muriyatga ko'rinadi. Fuqarolarga
+ko'rinadigan yagona umumiy ro'yxat — **reyting**: ism, surat, ball va
+tuman.
+
+⚠️ **AGAR** kelajakda xaritada yoki boshqa joyda **boshqa**
+fuqaroning matni/rasmi ko'rsatilsa, Apple 1.2 kuchga kiradi va
+`POST /api/mobile/reports` (kontentga shikoyat) + paneldagi ko'rib
+chiqish ro'yxati **majburiy** bo'ladi. Hozir u yozilmagan — ishlatilmay
+turgan endpoint o'zi ham xavf (test qilinmaydi, eskiradi).
+
+---
+
+# Deploy cheklisti
+
+## Muhit o'zgaruvchilari
+
+```bash
+NODE_ENV=production      # auth/dev ni YOPADI va Swagger'ni o'chiradi
+```
+
+**Sirlar — har biri ALOHIDA, kamida 32 belgi tasodifiy:**
+
+```bash
+openssl rand -base64 48   # har biri uchun alohida ishga tushiring
+```
+
+| O'zgaruvchi | Nima uchun alohida |
+|---|---|
+| `JWT_ACCESS_SECRET` | refresh token access sifatida o'tib ketmasligi uchun |
+| `JWT_REFRESH_SECRET` | ⬆ |
+| `MOBILE_JWT_SECRET` | **uchinchi** sir — fuqaro tokeni panelga **struktura jihatidan** kira olmaydi |
+| `BOT_API_KEY` | bot — foydalanuvchi emas, xizmat |
+
+⚠️ **`MOBILE_JWT_SECRET` IKKI ISHNI BAJARADI**: fuqaro tokenini
+imzolaydi **va** imzolangan havolalar (upload token, AI taklifi) hamda
+Apple `refresh_token` shifri uchun kalit beradi (kontekst bilan
+ajratilgan — `signed-ref.ts`, `secret-box.ts`). **Almashtirilsa**:
+ochiq qoralamalar va saqlangan Apple tokenlari yaroqsiz bo'ladi
+(revoke o'tkazib yuboriladi, o'chirish esa ishlayveradi).
+
+**Kirish yo'llari:**
+
+```bash
+GOOGLE_CLIENT_ID=""      # WEB turidagi mijoz id'si, Android/iOS niki EMAS
+GOOGLE_IOS_CLIENT_ID=""  # iOS'da `aud` BOSHQA bo'ladi — alohida
+APPLE_CLIENT_ID="uz.mysrv.nazoratchi"   # BUNDLE ID, "Services ID" emas
+APPLE_TEAM_ID="" APPLE_KEY_ID=""        # revoke uchun
+APPLE_PRIVATE_KEY_PATH="/var/lib/viloyat-shtabi/AuthKey_XXXXXXXXXX.p8"
+```
+
+⚠️ `.p8` kaliti **kod katalogidan tashqarida** va **`git` dan
+tashqarida** — bu tirik kalit.
+
+**Birinchi xodim:**
+
+```bash
+SEED_OWNER_PASSWORD="<kuchli-tasodifiy>"   # `owner123` EMAS
+```
+
+⚠️ Seed'dan **keyin** parol panel orqali almashtiriladi va
+`SEED_OWNER_PASSWORD` muhitdan **olib tashlanadi**.
+
+**Fayllar:**
+
+```bash
+UPLOADS_DIR="/var/lib/viloyat-shtabi/uploads"   # KOD KATALOGIDAN TASHQARIDA
+```
+
+⚠️ Standart qiymat loyiha ichiga tushadi va konteyner qayta
+qurilganda fayllar **kod bilan birga ketadi**. Bazada esa faqat yo'l
+qoladi: panelda murojaat ko'rinib turadi, **dalili** esa yo'q bo'ladi.
+
+## Infratuzilma
+
+- [ ] **HTTPS** — `nazoratchi-ai-api.mysrv.uz` (nginx + certbot).
+      Do'kon HTTP manzilni qabul qilmaydi; Apple ATS ham bloklaydi.
+- [ ] `CORS_ORIGINS` — panel manzili (`*` **emas**: panel
+      `credentials: true` bilan ishlaydi va brauzer `*` + credentials
+      birikmasini rad etadi).
+- [ ] **Teskari proksi `X-Forwarded-For` uzatsin** — aks holda nginx
+      ortida har so'rov `127.0.0.1` bo'lib ko'rinadi va tezlik
+      chegarasi **butun internetni bitta chelakka** soladi.
+- [ ] `public/` papkasi kod bilan birga ko'chirilgan.
+- [ ] Jarayon menejeri: PM2 (`fork`, `--max-restarts`) yoki Docker
+      `restart: unless-stopped`.
+- [ ] `prisma migrate deploy` — **deploy jarayonining qadami**
+      (`migrate dev` ishlab chiqarishda **ishlatilmaydi**: u schema'ni
+      qayta yaratishi mumkin).
+
+```bash
+npm ci && npx prisma migrate deploy && npm run build && npm run start
+```
+
+## Zaxira nusxa
+
+Kunlik, **ikkisi birga** — biri ikkinchisisiz ma'nosiz:
+
+```bash
+pg_dump viloyat_shtabi            # murojaat yozuvlari
+tar -C /var/lib/viloyat-shtabi    # ularning DALILLARI (uploads)
+```
+
+⚠️ **Bazani tiklab, fayllarni tiklamaslik** murojaatni dalilsiz
+qoldiradi — "Fayl — dalil, bezak emas" qoidasi shunisiz saqlanmaydi.
+
+⚠️ Dump ichida **shifrlangan** Apple tokenlari bor. Ular
+`MOBILE_JWT_SECRET` siz ochilmaydi, ya'ni **sir dump bilan bitta
+joyda saqlanmasligi** kerak.
+
+## Qabul qilish tekshiruvi
+
+```bash
+curl -s https://HOST/privacy        -o /dev/null -w "%{http_code}\n"   # 200
+curl -s https://HOST/terms          -o /dev/null -w "%{http_code}\n"   # 200
+curl -s https://HOST/delete-account -o /dev/null -w "%{http_code}\n"   # 200
+curl -s https://HOST/api/health                                        # status: ok
+curl -s https://HOST/api/docs       -o /dev/null -w "%{http_code}\n"   # 404 yoki 401
+
+# Chegara: ketma-ket 12 so'rov → oxirgilari 429
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  curl -s -o /dev/null -w "%{http_code} " -X POST https://HOST/api/auth/login \
+    -H "Content-Type: application/json" -d '{"username":"x","password":"xxxxxxxx"}'
+done; echo
+```
+
+---
+
+# Mobil dasturchiga — o'zgargan endpointlar
+
+| Endpoint | O'zgarish |
+|---|---|
+| `DELETE /api/mobile/me` | **YANGI**. `@CitizenOnly()`, javob **204** (tanasi bo'sh). Tasdiqni **ilova** so'raydi. Keyin token yaroqsiz → kirish ekraniga qaytarish. |
+| `POST /api/mobile/auth/apple` | `authorizationCode` **qo'shildi** (ixtiyoriy, `MaxLength(1024)`). `sign_in_with_apple` qaytargan `credential.authorizationCode` ni **birga yuboring** — usiz Apple ruxsati bekor qilinmaydi (App Store 5.1.1(v)). |
+| `POST /api/mobile/uploads` | Endi **faqat surat** qabul qiladi (video → 400 `"Bu yerda faqat surat yuborish mumkin"`). |
+| barcha endpointlar | **429** holati paydo bo'ldi — `message` ni foydalanuvchiga ko'rsatish kifoya (o'zbekcha matn serverdan keladi). |
+| barcha `@CitizenOnly()` | Hisob o'chirilgan bo'lsa **401** (ilgari faqat `isBlocked` → 403 edi). 401 → kirish ekraniga. |
+
+**Ilovada qo'shilishi kerak:**
+
+- `Profil → Hisobni o'chirish` tugmasi + ogohlantirish oynasi
+  («murojaatlar anonim holda saqlanadi, qayta kirsangiz yangi profil
+  yaratiladi»);
+- `/privacy` va `/terms` havolalari (App Store formasi ham so'raydi);
+- Apple kirishida `authorizationCode` ni yuborish.

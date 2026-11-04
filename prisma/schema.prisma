@@ -1090,6 +1090,49 @@ model Citizen {
   /// ⚠️ POCHTA EMAS, `sub` BO'YICHA TOPILADI (Google bilan ayni sabab).
   appleId String? @unique @map("apple_id")
 
+  /// Apple `refresh_token` — SHIFRLANGAN holda (`common/secret-box.ts`).
+  ///
+  /// ⚠️ NIMA UCHUN SAQLANADI: App Store qoidasi 5.1.1(v) hisobni
+  /// o'chirishda Apple RUXSATINI HAM bekor qilishni talab qiladi
+  /// (`/auth/revoke`). O'sha chaqiruv token talab qiladi va uni FAQAT
+  /// kirish paytida olish mumkin (`authorizationCode` bir martalik,
+  /// bir necha daqiqada so'nadi) — ya'ni o'chirish vaqtida qayta olib
+  /// bo'lmaydi. Saqlanmasa, revoke umuman imkonsiz bo'lardi.
+  ///
+  /// ⚠️ SHIFRLANGAN: bu TIRIK ruxsat — o'qigan odam fuqaro nomidan
+  /// Apple'dan yangi `id_token` olishi mumkin. Bazaga xom yozilsa,
+  /// zaxira nusxasi (dump) tarqalganda har bir iOS fuqaroning hisobi
+  /// ochilib ketardi. Kalit — `MOBILE_JWT_SECRET` dan (`signed-ref.ts`
+  /// bilan ayni mantiq: kontekst bilan ajratilgan).
+  ///
+  /// ⚠️ PANELGA HECH QACHON CHIQMAYDI va `select` ro'yxatlariga
+  /// qo'shilmaydi — faqat `mobile-auth` yozadi, faqat o'chirish
+  /// o'qiydi.
+  appleRefreshToken String? @map("apple_refresh_token")
+
+  /// ── HISOBNI O'CHIRISH (App Store 5.1.1(v), Google Play) ─────────
+  ///
+  /// O'chirilgan vaqt. `null` — hisob FAOL.
+  ///
+  /// ⚠️ QATOR O'CHIRILMAYDI, FAQAT BELGILANADI. Sabab: murojaatlar
+  /// (`Issue`) va izohlar HISOBOT uchun QOLADI — "mart oyida nechta
+  /// murojaat keldi" degan raqam odam hisobini o'chirgani uchun
+  /// o'zgarib ketmasligi kerak (`Issue.source` muhrlangan qiymat
+  /// bo'lgani bilan ayni sabab). Qator o'chirilsa, `citizenId` bo'sh
+  /// qolib murojaat "egasiz" bo'lardi yoki kaskad bilan murojaatlar
+  /// ham ketardi.
+  ///
+  /// ⚠️ SHAXSIY MA'LUMOT ESA TOZALANADI (`mobile.service.ts#deleteMe`):
+  /// ism, familiya, username, rasm, pochta, telefon, hudud va UCHALA
+  /// kirish kaliti (`telegramId`/`googleId`/`appleId`) `null` bo'ladi.
+  /// Ya'ni qator qoladi, ORTIDAGI ODAM esa qolmaydi.
+  ///
+  /// ⚠️ KALITLAR TOZALANGANI UCHUN qayta kirish YANGI fuqaro yaratadi:
+  /// eskisiga ulanmaydi. Bu ataylab — "o'chirdim" degan odam qayta
+  /// kirganda eski murojaatlari qaytib kelsa, o'chirish ishonchini
+  /// yo'qotardi.
+  deletedAt DateTime? @map("deleted_at")
+
   /// Google/Apple hisobidagi pochta — faqat KO'RSATISH uchun (panelda
   /// fuqaroni tanib olish). Kirish bo'yicha kalit EMAS.
   ///
@@ -1132,6 +1175,9 @@ model Citizen {
 
   @@index([points(sort: Desc)])
   @@index([districtId])
+  /// ⚠️ REYTING VA RO'YXATLAR `deletedAt: null` BO'YICHA FILTRLANADI —
+  /// indekssiz u butun jadvalni skanerlab o'tardi.
+  @@index([deletedAt])
   @@map("citizens")
 }
 

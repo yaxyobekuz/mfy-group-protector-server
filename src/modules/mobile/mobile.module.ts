@@ -1,11 +1,13 @@
 import { Module } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 
+import { AuditService } from "../../common/audit.service";
 import { IssuesModule } from "../issues/issues.module";
 import { UploadsModule } from "../uploads/uploads.module";
 import { BotCitizensController } from "./bot-citizens.controller";
 import { BotCitizensService } from "./bot-citizens.service";
 import { MobileAiService } from "./ai/mobile-ai.service";
+import { AppleTokenService } from "./apple-token.service";
 import { MobileAuthService } from "./mobile-auth.service";
 import { MobileController } from "./mobile.controller";
 import { MobileService } from "./mobile.service";
@@ -31,6 +33,17 @@ import { MobileService } from "./mobile.service";
   // Fuqaro botdan ham, mini-ilovadan ham AYNI yo'l bilan murojaat
   // yuboradi — faqat kirish usuli boshqacha.
   controllers: [MobileController, BotCitizensController],
-  providers: [MobileService, MobileAuthService, MobileAiService, BotCitizensService],
+  // ⚠️ `AppleTokenService` IKKI JOYDA ISHLATILADI: `MobileAuthService`
+  // kirishda kod almashtiradi, `MobileService` o'chirishda ruxsatni
+  // bekor qiladi. Bitta nusxa — `.p8` kaliti ham bir marta o'qiladi
+  // (xizmat uni keshlaydi).
+  providers: [
+    MobileService,
+    MobileAuthService,
+    MobileAiService,
+    AppleTokenService,
+    BotCitizensService,
+    AuditService,
+  ],
 })
 export class MobileModule {}

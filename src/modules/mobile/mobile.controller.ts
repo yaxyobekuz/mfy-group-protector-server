@@ -13,6 +13,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -23,13 +24,16 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
+import { Throttle } from "@nestjs/throttler";
 
 import {
   CitizenOnly,
+  ClientIp,
   CurrentCitizen,
   Public,
   type RequestCitizen,
 } from "../../common/decorators";
+import { THROTTLE } from "../../common/throttle";
 import { MAX_FILE_SIZE } from "../uploads/uploads.constants";
 import { MobileAuthService } from "./mobile-auth.service";
 import { MobileService } from "./mobile.service";
@@ -56,7 +60,14 @@ export class MobileController {
   ) {}
 
   // ── KIRISH ────────────────────────────────────────────────────────
+  /**
+   * ⚠️ KIRISH CHEGARASI (`THROTTLE.AUTH`) — IP bo'yicha, daqiqada 10.
+   * Token hali yo'q, ya'ni sanash FAQAT IP bo'yicha bo'lishi mumkin
+   * (`throttler.guard.ts`) — va himoya qilinadigan narsa ham aynan
+   * "token olishga urinish". Qiymat `common/throttle.ts` da.
+   */
   @Public()
+  @Throttle({ [THROTTLE.AUTH]: {} })
   @Post("auth/telegram")
   @HttpCode(200)
   authTelegram(@Body() dto: TelegramAuthDto) {
@@ -72,6 +83,7 @@ export class MobileController {
    * yagona kirish yo'liga ega.
    */
   @Public()
+  @Throttle({ [THROTTLE.AUTH]: {} })
   @Post("auth/google")
   @HttpCode(200)
   authGoogle(@Body() dto: GoogleAuthDto) {
@@ -87,13 +99,19 @@ export class MobileController {
    * mavjud kirish yo'liga ega, ikkisi bir-biriga zaxira emas.
    */
   @Public()
+  @Throttle({ [THROTTLE.AUTH]: {} })
   @Post("auth/apple")
   @HttpCode(200)
   authApple(@Body() dto: AppleAuthDto) {
-    return this.auth.loginWithApple(dto.identityToken);
+    // ⚠️ `authorizationCode` IXTIYORIY: eski ilova versiyasi uni
+    // yubormaydi va kirish BARIBIR ishlaydi — faqat hisob
+    // o'chirilganda Apple ruxsati bekor qilinmay qoladi
+    // (`apple-token.service.ts`).
+    return this.auth.loginWithApple(dto.identityToken, dto.authorizationCode);
   }
 
   @Public()
+  @Throttle({ [THROTTLE.AUTH]: {} })
   @Post("auth/dev")
   @HttpCode(200)
   authDev(@Body() dto: DevAuthDto) {
@@ -111,6 +129,36 @@ export class MobileController {
   @Patch("me")
   updateMe(@CurrentCitizen() citizen: RequestCitizen, @Body() dto: UpdateProfileDto) {
     return this.mobile.updateProfile(citizen.id, dto);
+  }
+
+  /**
+   * HISOBNI O'CHIRISH — FUQARONING O'ZI.
+   *
+   * ⚠️ DO'KON TALABI (App Store 5.1.1(v), Google Play): ilova ichida
+   * hisob yaratilsa, ilova ICHIDA uni o'chirish yo'li ham bo'lishi
+   * SHART — usiz ilova RAD ETILADI.
+   *
+   * ⚠️ `204` (bo'sh javob): o'chirilgandan keyin qaytaradigan profil
+   * YO'Q. `200` + `{ok:true}` bo'lsa, ilova javobni profil deb o'qib
+   * urinishi mumkin edi.
+   *
+   * ⚠️ FUQARO FAQAT O'ZINI O'CHIRADI: id SO'ROVDAN OLINMAYDI, tokendan
+   * (`@CurrentCitizen`). `DELETE /mobile/:id` shaklida bo'lsa, boshqa
+   * fuqaroning id'sini yuborib ko'rish yo'li paydo bo'lardi.
+   *
+   * ⚠️ TASDIQ ILOVADA SO'RALADI (`profile_screen.dart`), serverda
+   * emas: "rostdanmi?" degan savolni API darajasida qo'yish
+   * (`?confirm=true`) hech narsadan himoya qilmaydi — tugmani bosgan
+   * odam parametrni ham yuboradi.
+   */
+  @CitizenOnly()
+  @Delete("me")
+  @HttpCode(204)
+  async deleteMe(
+    @CurrentCitizen() citizen: RequestCitizen,
+    @ClientIp() ip: string | null,
+  ): Promise<void> {
+    await this.mobile.deleteMe(citizen.id, ip);
   }
 
   // ── MA'LUMOTNOMALAR ─────────────────────────────────────────────────
@@ -147,7 +195,14 @@ export class MobileController {
     return this.mobile.mapPoints(citizen.id, query);
   }
 
+  /**
+   * ⚠️ AI CHEGARASI (`THROTTLE.AI`) — ENG QATTIQ, chunki har chaqiruv
+   * OpenAI hisobidan PUL yechadi. Fuqaro bo'yicha sanaladi
+   * (`throttler.guard.ts`): NAT ortidagi qo'shnilar bir-birini
+   * bloklamasligi uchun.
+   */
   @CitizenOnly()
+  @Throttle({ [THROTTLE.AI]: {} })
   @Post("appeals/analyze")
   @HttpCode(200)
   analyze(@Body() dto: AnalyzeDto) {
@@ -160,7 +215,14 @@ export class MobileController {
     return this.mobile.getAppeal(citizen.id, id);
   }
 
+  /**
+   * ⚠️ `THROTTLE.APPEAL` — KUNLIK CHEGARA O'RNINI BOSMAYDI
+   * (`Settings.mobileDailyLimit`): u "kunda nechta" degan MA'MURIY
+   * qoida, bu esa "daqiqada nechta" degan texnik himoya. Ikkisi
+   * birga ishlaydi.
+   */
   @CitizenOnly()
+  @Throttle({ [THROTTLE.APPEAL]: {} })
   @Post("appeals")
   create(@CurrentCitizen() citizen: RequestCitizen, @Body() dto: CreateAppealDto) {
     return this.mobile.create(citizen, dto);
@@ -178,7 +240,13 @@ export class MobileController {
   }
 
   // ── FAYL ────────────────────────────────────────────────────────────
+  /**
+   * ⚠️ `THROTTLE.UPLOAD` — diskni to'ldirishga qarshi. Hajm chegarasi
+   * (`MAX_FILE_SIZE`) BITTA faylni cheklaydi, bu esa SONINI: 25 MB × 
+   * cheksiz so'rov baribir diskni yeb qo'yardi.
+   */
   @CitizenOnly()
+  @Throttle({ [THROTTLE.UPLOAD]: {} })
   @Post("uploads")
   @UseInterceptors(
     FileInterceptor("file", {

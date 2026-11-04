@@ -20,16 +20,24 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { IssueSource, IssueStatus, type Prisma } from "@prisma/client";
 
 import { PrismaService } from "../../prisma/prisma.service";
+import { AuditService } from "../../common/audit.service";
+import {
+  DELETED_CITIZEN_NAME,
+  activeCitizenWhere,
+} from "../../common/citizen-deleted";
 import { POINTS } from "../../common/points";
+import { SECRET_CONTEXT, openSecret } from "../../common/secret-box";
 import { signRef, verifyRef } from "../../common/signed-ref";
 import { IssuesService } from "../issues/issues.service";
 import { UploadsService } from "../uploads/uploads.service";
 import { MobileAiService } from "./ai/mobile-ai.service";
+import { AppleTokenService } from "./apple-token.service";
 import type {
   AddAppealCommentDto,
   AnalyzeDto,
@@ -57,11 +65,15 @@ const TIMELINE: { key: string; label: string; statuses: IssueStatus[] }[] = [
 
 @Injectable()
 export class MobileService {
+  private readonly logger = new Logger(MobileService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly issues: IssuesService,
     private readonly uploads: UploadsService,
     private readonly ai: MobileAiService,
+    private readonly appleTokens: AppleTokenService,
+    private readonly audit: AuditService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════
@@ -97,6 +109,175 @@ export class MobileService {
       createdAt: citizen.createdAt,
       stats,
     };
+  }
+
+  /**
+   * HISOBNI O'CHIRISH — FUQARONING O'ZI (App Store 5.1.1(v), Google Play).
+   *
+   * ── NIMA UCHUN MAJBURIY ────────────────────────────────────────────
+   *
+   * ⚠️ DO'KON TALABI: ilova ichida hisob yaratish mumkin bo'lsa,
+   * ilova ICHIDA uni o'chirish yo'li ham bo'lishi SHART. Usiz ilova
+   * App Store'da ham, Google Play'da ham RAD ETILADI. "Bizga yozing,
+   * qo'lda o'chiramiz" degan variant QABUL QILINMAYDI.
+   *
+   * ── NIMA O'CHADI, NIMA QOLADI ──────────────────────────────────────
+   *
+   *   SHAXSIY MA'LUMOT     →  tozalanadi (ism, username, rasm,
+   *                           pochta, telefon, hudud, kirish kalitlari)
+   *   MUROJAATLAR/IZOHLAR  →  QOLADI, lekin MUALLIFI ANONIM
+   *
+   * ⚠️ MUROJAAT O'CHIRILMAYDI: u — hisobot va statistika birligi.
+   * "Mart oyida nechta murojaat keldi" degan raqam odam hisobini
+   * o'chirgani uchun o'zgarib ketmasligi kerak (`Issue.source`
+   * muhrlangan qiymat bo'lgani bilan AYNI sabab). Shuningdek
+   * `IssueComment` — append-only, ya'ni uni o'chirish doktrinaga zid.
+   *
+   * ⚠️ MUROJAAT MATNIDA SHAXSIY MA'LUMOT BO'LISHI MUMKIN (manzil,
+   * telefon — fuqaro o'zi yozgan) va u matn QOLADI. Shuning uchun bu
+   * holat maxfiylik siyosatida ANIQ yozilgan (`/privacy`) — yashirib
+   * qo'yish do'kon tekshiruvida ham, qonun oldida ham muammo
+   * bo'lardi.
+   *
+   * ── QAYTA KIRISH ───────────────────────────────────────────────────
+   *
+   * ⚠️ UCHALA KALIT (`telegramId`/`googleId`/`appleId`) `null`
+   * QILINADI: shu hisob bilan qayta kirilsa, `upsert` mos qator
+   * topmaydi va YANGI fuqaro yaratiladi — eskisiga ULANMAYDI. Bu
+   * ataylab: "o'chirdim" degan odam qayta kirganda eski murojaatlari
+   * qaytib kelsa, o'chirish ishonchini yo'qotardi.
+   *
+   * ── ESKI TOKEN ─────────────────────────────────────────────────────
+   *
+   * ⚠️ MOBIL TOKEN 30 KUNLIK VA REFRESH YO'Q, ya'ni o'chirilgan
+   * hisobning tokeni hali ham IMZO JIHATIDAN HAQIQIY. Shuning uchun
+   * `JwtAuthGuard#checkCitizen` har so'rovda `deletedAt` ni BAZADAN
+   * tekshiradi — aks holda o'chirilgan hisob token muddati
+   * tugamaguncha ishlab yuraverardi.
+   */
+  async deleteMe(citizenId: string, ip?: string | null) {
+    const citizen = await this.prisma.citizen.findUnique({
+      where: { id: citizenId },
+      select: { id: true, deletedAt: true, appleRefreshToken: true },
+    });
+    if (!citizen) throw new NotFoundException("Fuqaro topilmadi");
+
+    /**
+     * ⚠️ TAKROR SO'ROV JIM O'TADI (xato EMAS). Guard o'chirilgan
+     * hisobni allaqachon to'xtatadi, ya'ni bu yerga tushish uchun
+     * ikki so'rov AYNI VAQTDA kelishi kerak (ilova tugmani ikki
+     * marta bosdi). O'shanda 404 qaytarish fuqaroga "o'chmadi"
+     * degan noto'g'ri xabar berardi — aslida o'chgan.
+     */
+    if (citizen.deletedAt) return;
+
+    /**
+     * ── APPLE RUXSATINI BEKOR QILISH ────────────────────────────────
+     *
+     * ⚠️ TRANZAKSIYADAN TASHQARIDA VA UNDAN OLDIN: tarmoq chaqiruvi
+     * tranzaksiya ichida bo'lsa, baza qulflari Apple javob
+     * bermaguncha (10 soniyagacha) ushlab turilardi.
+     *
+     * ⚠️ XATO O'CHIRISHNI TO'XTATMAYDI (`revoke` o'zi yutadi va
+     * `false` qaytaradi): aks holda Apple xizmati ishlamagan paytda
+     * fuqaro hisobini umuman o'chira olmasdi — ya'ni do'kon talabi
+     * BUZILARDI. Xato logga tushadi.
+     */
+    let appleRevoked = false;
+    if (citizen.appleRefreshToken) {
+      const refreshToken = openSecret(
+        SECRET_CONTEXT.APPLE_REFRESH,
+        citizen.appleRefreshToken,
+      );
+      if (refreshToken) {
+        appleRevoked = await this.appleTokens.revoke(refreshToken);
+      } else {
+        // ⚠️ KALIT ALMASHGAN BO'LSA SHU YERGA TUSHADI — o'chirish
+        // davom etadi, lekin sabab logda ko'rinishi kerak.
+        this.logger.warn(
+          `Apple refresh token ochilmadi (citizen=${citizenId}) — revoke o'tkazib yuborildi`,
+        );
+      }
+    }
+
+    /**
+     * ⚠️ BITTA TRANZAKSIYA: tozalash yarim bajarilsa, hisob
+     * "o'chirilgan" deb belgilanib, kalitlari joyida qolardi — ya'ni
+     * qayta kirgan odam o'chirilgan hisobga ULANIB qolardi va guard
+     * uni darhol bloklardi. Fuqaro ilovaga butunlay kira olmasdi.
+     */
+    await this.prisma.$transaction(async (tx) => {
+      await tx.citizen.update({
+        where: { id: citizenId },
+        data: {
+          deletedAt: new Date(),
+
+          // ── SHAXSIY MA'LUMOT ────────────────────────────────────
+          // ⚠️ ISM BO'SH QOLDIRILMAYDI (`firstName` — majburiy
+          // ustun) va panelda "o'chirilgan" deb KO'RINISHI kerak:
+          // bo'sh satr qo'yilsa, ro'yxatda ismsiz qator chiqib,
+          // xodim buni baza xatosi deb o'ylardi.
+          firstName: DELETED_CITIZEN_NAME,
+          lastName: null,
+          username: null,
+          photoUrl: null,
+          email: null,
+          phone: null,
+
+          // ── KIRISH KALITLARI ────────────────────────────────────
+          // ⚠️ UCHALASI: qaysi yo'l bilan kirgani muhim emas —
+          // qayta kirish YANGI fuqaro yaratishi kerak.
+          telegramId: null,
+          googleId: null,
+          appleId: null,
+
+          // ⚠️ APPLE TOKENI HAM O'CHADI: revoke'dan keyin u yaroqsiz
+          // va saqlab turish kerak emas (tirik sir bazada qolmasin).
+          appleRefreshToken: null,
+
+          // ── HUDUD VA REYTING ────────────────────────────────────
+          // ⚠️ HUDUD TOZALANADI: u shaxsni aniqlashga yaqinlashtiradi
+          // (MFY — kichik hudud). Murojaatdagi `mahallaId` esa
+          // QOLADI — u hisobot uchun muhrlangan NUSXA.
+          districtId: null,
+          mahallaId: null,
+
+          // ⚠️ BALL NOLGA: o'chirilgan fuqaro reytingda turmasligi
+          // kerak. Filtr ham bor (`deletedAt`), lekin ball qolsa
+          // "jami ball" yig'indisi egasi yo'q hisobni sanab
+          // yurardi.
+          points: 0,
+
+          // ⚠️ BLOK TOZALANADI: u — MA'MURIY chora va o'chirilgan
+          // hisobda ma'nosi yo'q. Qolsa, panelda "bloklangan"
+          // ro'yxatida egasiz qator turardi.
+          isBlocked: false,
+          blockReason: null,
+        },
+      });
+    });
+
+    /**
+     * ⚠️ AUDIT — TRANZAKSIYADAN KEYIN va `userId: null`: amalni XODIM
+     * emas, FUQARONING O'ZI qildi (`AuditLog.userId` — xodim ustuni).
+     * Kim o'chirgani `entityId` da qoladi, ya'ni "bu hisob nega
+     * anonim?" degan savolga javob bor.
+     *
+     * ⚠️ `meta` GA SHAXSIY MA'LUMOT YOZILMAYDI: aks holda hozir
+     * tozalagan ism/pochta audit jurnalida QOLIB ketardi va butun
+     * amal ma'nosiz bo'lardi. Faqat texnik faktlar.
+     */
+    await this.audit.record({
+      userId: null,
+      action: "citizen.self_delete",
+      entity: "Citizen",
+      entityId: citizenId,
+      meta: {
+        appleRevoked,
+        appleTokenHad: Boolean(citizen.appleRefreshToken),
+      },
+      ip: ip ?? null,
+    });
   }
 
   async updateProfile(citizenId: string, dto: UpdateProfileDto) {
@@ -507,8 +688,19 @@ export class MobileService {
     return { ok: true };
   }
 
+  /**
+   * ⚠️ FAQAT SURAT (`["photo"]`): mobil ilova ham, mini-ilova ham
+   * video tanlamaydi (`image_picker.pickImage`), ya'ni bu
+   * endpoint'ga kelgan video QO'LDA yasalgan so'rov bo'ladi. Bot
+   * yo'li esa videoni qabul qiladi — fuqaro Telegram'da uni ataylab
+   * yuboradi va u haqiqiy dalil (`bot-citizens.service.ts`).
+   *
+   * ⚠️ TEKSHIRUV SERVERDA, ILOVADA EMAS: ilovadagi tanlagich
+   * qulaylik, HAQIQIY chegara shu yerda (`mobile.dto.ts` dagi
+   * "chegara ilovada emas, serverda" qoidasi bilan ayni).
+   */
   async upload(file: { buffer: Buffer; size: number; originalname?: string }) {
-    return this.uploads.save(file);
+    return this.uploads.save(file, ["photo"]);
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -568,6 +760,11 @@ export class MobileService {
       where: {
         points: { gt: 0 },
         isBlocked: false,
+        // ⚠️ O'CHIRILGAN HISOB REYTINGDA YO'Q: reyting — RAG'BAT
+        // ro'yxati va "O'chirilgan foydalanuvchi" nomi bilan qator
+        // unda turishi ma'nosiz bo'lardi. Ball ham nolga tushadi
+        // (`deleteMe`), ya'ni bu IKKINCHI himoya qatlami.
+        ...activeCitizenWhere,
         ...(districtId ? { districtId } : {}),
       },
       orderBy: { points: "desc" },

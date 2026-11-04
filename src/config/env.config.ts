@@ -186,6 +186,62 @@ export const env = {
   appleClientId: optional("APPLE_CLIENT_ID"),
 
   /**
+   * APPLE RUXSATINI BEKOR QILISH (`/auth/revoke`) UCHUN KALITLAR.
+   *
+   * ⚠️ NIMA UCHUN KERAK: App Store qoidasi 5.1.1(v) — "Sign in with
+   * Apple" bilan kirgan fuqaro hisobini o'chirganda Apple TOMONIDAGI
+   * ruxsat ham bekor qilinishi SHART. Faqat bazani tozalash yetarli
+   * emas: iPhone sozlamalarida ilova "Apple ID bilan bog'langan"
+   * bo'lib turardi va App Store tekshiruvi aynan shuni ushlaydi.
+   *
+   * ⚠️ `client_secret` — PAROL EMAS, ES256 BILAN IMZOLANGAN JWT
+   * (`apple-revoke.service.ts`). Uni har chaqiruvda o'zimiz yasaymiz
+   * va `.p8` kaliti bilan imzolaymiz.
+   *
+   * ⚠️ BARCHASI MAJBURIY EMAS: bo'lsa revoke chaqiriladi, bo'lmasa
+   * O'TKAZIB YUBORILADI va hisob BARIBIR o'chadi (Google bilan ayni
+   * mantiq — kirish yo'li sozlanmagani butun tizimni to'xtatmaydi).
+   * O'chirishni revoke'ga bog'lash fuqaroni "hisobimni o'chirib
+   * bo'lmayapti" holatida qoldirardi — bu do'kon talabini BUZISH
+   * bo'lardi.
+   */
+  apple: {
+    /** Apple Developer hisobidagi Team ID (10 belgi). */
+    teamId: optional("APPLE_TEAM_ID"),
+    /** `.p8` kaliti id'si (Apple Developer → Keys). */
+    keyId: optional("APPLE_KEY_ID"),
+    /**
+     * `.p8` kalitining O'ZI (PEM matni) yoki UNGA YO'L.
+     *
+     * ⚠️ IKKI SHAKL QABUL QILINADI: `.env` ichida ko'p qatorli PEM
+     * saqlash noqulay (`\n` qo'lda yoziladi va bitta xato kalitni
+     * yaroqsiz qiladi), shuning uchun fayl yo'li ham bo'lishi mumkin.
+     * Qaysi shakl kelganini `apple-revoke.service.ts` o'zi aniqlaydi.
+     */
+    privateKey: optional("APPLE_PRIVATE_KEY"),
+    privateKeyPath: optional("APPLE_PRIVATE_KEY_PATH"),
+  },
+
+  /**
+   * SWAGGER (`/api/docs`) — ISHLAB CHIQARISHDA STANDART HOLDA YOPIQ.
+   *
+   * ⚠️ TESKARI EMAS ("kerak bo'lsa yopamiz"): hujjat butun API
+   * tuzilmasini, DTO maydonlarini va ruxsat nomlarini oshkor qiladi.
+   * Ishlab chiqishda u ochiq (qulaylik), `production` da esa FAQAT
+   * shu o'zgaruvchi ataylab `true` qilinsa ochiladi.
+   *
+   * ⚠️ OCHILGANDA HAM PAROL TALAB QILINADI (`SWAGGER_USER` /
+   * `SWAGGER_PASSWORD`) — ular bo'lmasa `production` da hujjat
+   * umuman ulanmaydi (`main.ts`). "Yoqdim, lekin parolni unutdim"
+   * holati ochiq hujjat bo'lib qolardi.
+   */
+  swagger: {
+    enabled: process.env.SWAGGER_ENABLED?.trim() === "true",
+    user: optional("SWAGGER_USER"),
+    password: optional("SWAGGER_PASSWORD"),
+  },
+
+  /**
    * YUKLANGAN FAYLLAR PAPKASI (murojaat dalillari).
    *
    * ⚠️ STANDART QIYMAT — `process.cwd()/uploads/appeals`, ya'ni LOYIHA

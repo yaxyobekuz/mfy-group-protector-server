@@ -15,6 +15,7 @@ import { IssueStatus, type Prisma } from "@prisma/client";
 import { env } from "../../config/env.config";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../../common/audit.service";
+import { activeCitizenWhere } from "../../common/citizen-deleted";
 import { paginate } from "../../common/dto/pagination.dto";
 import { districtScopeWhere, type ScopeContext } from "../../common/scope.util";
 import type {
@@ -78,6 +79,12 @@ export class CitizensService {
         appeals: c._count.issues,
         isBlocked: c.isBlocked,
         blockReason: c.blockReason,
+        // ⚠️ PANELDA "O'CHIRILGAN" DEB KO'RINADI: qator qoladi
+        // (murojaatlari hisobotda kerak), lekin xodim uning ortida
+        // ODAM YO'Q ekanini bilishi kerak — aks holda "nega bu
+        // fuqaroga javob bormayapti" degan savol tug'ilardi.
+        isDeleted: c.deletedAt !== null,
+        deletedAt: c.deletedAt,
         createdAt: c.createdAt,
       })),
       total,
@@ -116,6 +123,10 @@ export class CitizensService {
       points: citizen.points,
       isBlocked: citizen.isBlocked,
       blockReason: citizen.blockReason,
+      // ⚠️ O'CHIRILGAN HISOB — ro'yxat bilan ayni belgi (yuqoridagi
+      // izoh). Murojaatlari KO'RINADI, muallifi esa anonim.
+      isDeleted: citizen.deletedAt !== null,
+      deletedAt: citizen.deletedAt,
       createdAt: citizen.createdAt,
       stats: { total, open, resolved },
     };
@@ -151,6 +162,10 @@ export class CitizensService {
     const where: Prisma.CitizenWhereInput = {
       points: { gt: 0 },
       isBlocked: false,
+      // ⚠️ O'CHIRILGAN HISOB REYTINGDA YO'Q — ilovadagi reyting bilan
+      // AYNI qoida (`mobile.service.ts#rating`). Ikkisi ajralsa,
+      // panelda va ilovada BOSHQA-BOSHQA o'rin ko'rsatilardi.
+      ...activeCitizenWhere,
       ...districtScopeWhere(scope),
       ...(query.districtId ? { districtId: query.districtId } : {}),
     };
@@ -257,6 +272,13 @@ export class CitizensService {
     const recipients = await this.prisma.citizen.findMany({
       where: {
         isBlocked: false,
+        // ⚠️ O'CHIRILGAN HISOBGA YOZILMAYDI. Amalda `telegramId`
+        // filtri uni allaqachon chiqarib tashlaydi (o'chirishda u
+        // `null` bo'ladi), lekin shartni ATAYLAB yozamiz: himoya
+        // tasodifga qoldirilmaydi — `telegramId` ni tozalash qoidasi
+        // keyin o'zgarsa, tarqatma jimgina o'chirilgan hisoblarga
+        // ketib qolardi.
+        ...activeCitizenWhere,
         // ⚠️ TELEGRAM HISOBI BORLAR: mobil ilovadan (Google bilan)
         // kirgan fuqaroda `telegramId` YO'Q va unga Telegram orqali
         // xabar yuborib bo'lmaydi. Filtrsiz ular "failed" bo'lib

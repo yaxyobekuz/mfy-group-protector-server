@@ -173,11 +173,40 @@ export class JwtAuthGuard implements CanActivate {
 
     const citizen = await this.prisma.citizen.findUnique({
       where: { id: payload.sub },
-      select: { id: true, telegramId: true, firstName: true, isBlocked: true, blockReason: true },
+      select: {
+        id: true,
+        telegramId: true,
+        firstName: true,
+        isBlocked: true,
+        blockReason: true,
+        deletedAt: true,
+      },
     });
 
     if (!citizen) {
       throw new UnauthorizedException("Foydalanuvchi topilmadi");
+    }
+
+    /**
+     * ⚠️ O'CHIRILGAN HISOB — TOKENI HAQIQIY BO'LSA HAM TO'XTATILADI.
+     *
+     * Mobil token 30 KUNLIK va REFRESH YO'Q (`mobile-auth.service.ts`),
+     * ya'ni o'chirishdan keyin ham imzo jihatidan HAQIQIY bo'lib
+     * qoladi. Faqat bazani tozalash yetarli emasdi: o'chirilgan hisob
+     * egasi eski token bilan murojaat yuborib, izoh yozib yuraverardi
+     * — "hisobim o'chdi" degan odam nomidan. Shuning uchun tekshiruv
+     * BAZADAN, har so'rovda (ruxsat va `isBlocked` bilan AYNI sabab).
+     *
+     * ⚠️ `401`, `403` EMAS: ilova 401 ni "token yaroqsiz" deb
+     * tushunadi va kirish ekraniga qaytadi — aynan kerakli xatti-
+     * harakat. `403` esa "kirgansiz, lekin ruxsat yo'q" degani va
+     * ilova foydalanuvchini ichida ushlab turardi.
+     *
+     * ⚠️ SABAB AYTILMAYDI: bu yerga tushgan odam hisobni o'zi
+     * o'chirgan va nimani kutayotganini biladi.
+     */
+    if (citizen.deletedAt) {
+      throw new UnauthorizedException("Token yaroqsiz");
     }
 
     if (citizen.isBlocked) {

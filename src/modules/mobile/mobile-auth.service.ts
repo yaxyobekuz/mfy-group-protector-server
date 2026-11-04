@@ -32,7 +32,9 @@ import { OAuth2Client, type TokenPayload } from "google-auth-library";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 
 import { env } from "../../config/env.config";
+import { SECRET_CONTEXT, sealSecret } from "../../common/secret-box";
 import { PrismaService } from "../../prisma/prisma.service";
+import { AppleTokenService } from "./apple-token.service";
 
 /** `initData` dagi `user` maydonidan kerakli qism. */
 interface TelegramUser {
@@ -65,6 +67,7 @@ const APPLE_ISSUER = "https://appleid.apple.com";
 /** Apple'ning imzo kalitlari (JWKS) manzili. */
 const APPLE_JWKS_URL = new URL("https://appleid.apple.com/auth/keys");
 
+
 @Injectable()
 export class MobileAuthService {
   private readonly logger = new Logger(MobileAuthService.name);
@@ -93,6 +96,7 @@ export class MobileAuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    private readonly appleTokens: AppleTokenService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────
@@ -247,7 +251,10 @@ export class MobileAuthService {
    * pochtani ALOHIDA beradi, lekin biz unga ISHONMAYMIZ: faqat
    * imzolangan tokendan olinadi (Google bilan ayni sabab).
    */
-  async loginWithApple(identityToken: string): Promise<{ token: string; citizen: unknown }> {
+  async loginWithApple(
+    identityToken: string,
+    authorizationCode?: string,
+  ): Promise<{ token: string; citizen: unknown }> {
     /**
      * ⚠️ SOZLANMAGAN BO'LSA 503, 401 EMAS (Google bilan ayni sabab):
      * bu fuqaroning aybi emas, SERVER sozlanmagani.
@@ -288,6 +295,28 @@ export class MobileAuthService {
     const email =
       typeof payload.email === "string" ? payload.email.trim().toLowerCase() || null : null;
 
+    /**
+     * ── RUXSATNI BEKOR QILISH UCHUN TOKEN ──────────────────────────
+     *
+     * ⚠️ AYNAN SHU YERDA OLINADI, O'CHIRISHDA EMAS: `authorizationCode`
+     * BIR MARTALIK va bir necha daqiqada so'nadi — hisob o'chirilayotgan
+     * paytda (kunlar/oylar keyin) uni almashtirib bo'lmaydi. Shuning
+     * uchun `refresh_token` kirishda olinadi, shifrlanadi va bazada
+     * saqlanadi (`secret-box.ts`).
+     *
+     * ⚠️ XATO KIRISHNI TO'XTATMAYDI: `exchangeCode` xatoni O'ZI
+     * yutadi va `null` qaytaradi (`apple-token.service.ts`). Apple
+     * xizmati sekinlashgani butun iOS kirishini to'xtatmasligi kerak
+     * — o'shanda faqat revoke o'tkazib yuboriladi.
+     *
+     * ⚠️ `null` BO'LSA MAVJUD QIYMAT O'CHIRILMAYDI (`upsertAndIssue`):
+     * fuqaro ilgari kod yuborgan bo'lsa, eski token saqlanib qoladi
+     * va o'chirishda ishlayveradi.
+     */
+    const appleRefreshToken = authorizationCode
+      ? await this.appleTokens.exchangeCode(authorizationCode)
+      : null;
+
     return this.upsertAndIssue({
       key: { appleId: payload.sub },
       email,
@@ -305,6 +334,7 @@ export class MobileAuthService {
       languageCode: "uz",
       // ⚠️ ISM O'CHMASIN: izoh yuqorida va `upsertAndIssue` da.
       nameIsFresh: false,
+      appleRefreshToken,
     });
   }
 
@@ -373,8 +403,23 @@ export class MobileAuthService {
      * ular uchun `true` (standart), eski xatti-harakat o'zgarmaydi.
      */
     nameIsFresh?: boolean;
+    /**
+     * Apple `refresh_token` — XOM holda keladi, SHU YERDA shifrlanadi.
+     *
+     * ⚠️ `null`/`undefined` BO'LSA MAVJUD QIYMATGA TEGILMAYDI: fuqaro
+     * ilgari kod yuborgan bo'lsa (yangi versiya), keyinroq kodsiz
+     * kirsa ham (eski versiya) eski token saqlanib qolishi kerak —
+     * aks holda revoke imkoni jimgina yo'qolardi.
+     */
+    appleRefreshToken?: string | null;
   }): Promise<{ token: string; citizen: unknown }> {
     const nameIsFresh = data.nameIsFresh ?? true;
+
+    // ⚠️ SHIFRLASH SHU YERDA, BIR JOYDA: chaqiruvchi xom token bilan
+    // ishlaydi va "shifrlashni unutish" imkoni yo'q.
+    const sealedApple = data.appleRefreshToken
+      ? sealSecret(SECRET_CONTEXT.APPLE_REFRESH, data.appleRefreshToken)
+      : null;
 
     const citizen = await this.prisma.citizen.upsert({
       where: data.key,
@@ -392,9 +437,20 @@ export class MobileAuthService {
         // bilan kirgan fuqaroning pochtasi o'chib ketardi. (Apple ham
         // pochtani faqat birinchi kirishda beradi — ayni himoya.)
         ...(data.email !== undefined && data.email !== null ? { email: data.email } : {}),
+        // ⚠️ FAQAT YANGI TOKEN KELGANDA YOZILADI — yuqoridagi izoh.
+        ...(sealedApple ? { appleRefreshToken: sealedApple } : {}),
+        /**
+         * ⚠️ O'CHIRILGAN HISOB QAYTA TIRILMAYDI. Nazariy jihatdan bu
+         * yerga tushib bo'lmaydi (o'chirishda uchala kalit `null`
+         * qilinadi, ya'ni `where` mos kelmaydi va `create` ketadi),
+         * lekin `deletedAt` ni ATAYLAB tozalamaymiz: kalitlarni
+         * tozalashda xato bo'lsa ham o'chirilgan hisob jimgina
+         * qaytib kelmasligi kerak. Ikkinchi himoya qatlami.
+         */
       },
       create: {
         ...data.key,
+        ...(sealedApple ? { appleRefreshToken: sealedApple } : {}),
         firstName: data.firstName,
         lastName: data.lastName,
         username: data.username,

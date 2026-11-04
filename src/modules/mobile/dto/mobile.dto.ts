@@ -70,6 +70,29 @@ export class GoogleAuthDto {
 export class AppleAuthDto {
   /** Apple `identityToken` (JWT) — `sign_in_with_apple` beradi. */
   @IsString() @MaxLength(6144) identityToken!: string;
+
+  /**
+   * BIR MARTALIK KOD — `refresh_token` ga almashtirish uchun.
+   *
+   * ⚠️ NIMA UCHUN KERAK: App Store qoidasi 5.1.1(v) hisob
+   * o'chirilganda Apple RUXSATINI HAM bekor qilishni talab qiladi
+   * (`/auth/revoke`), va o'sha chaqiruv `refresh_token` so'raydi.
+   * Tokenni esa FAQAT shu kod bilan olish mumkin — kod BIR MARTALIK
+   * va bir necha daqiqada so'nadi, ya'ni o'chirish paytida qayta
+   * olib bo'lmaydi. Shuning uchun u KIRISHDA olinadi
+   * (`apple-token.service.ts`).
+   *
+   * ⚠️ IXTIYORIY: eski ilova versiyasi uni YUBORMAYDI va o'shanda
+   * kirish BARIBIR ishlaydi — faqat o'chirishda revoke o'tkazib
+   * yuboriladi. Majburiy qilinsa, do'konda turgan eski versiyadagi
+   * fuqarolar kirishdan butunlay uzilib qolardi.
+   *
+   * ⚠️ BU KOD — AUTENTIFIKATSIYA DALILI EMAS. Kim kirgani FAQAT
+   * `identityToken` imzosidan aniqlanadi; kod esa hisobni o'chirish
+   * uchun ishlatiladigan yordamchi qiymat. Shu tufayli u yaroqsiz
+   * bo'lsa ham kirish rad etilmaydi.
+   */
+  @IsOptional() @IsString() @MaxLength(1024) authorizationCode?: string;
 }
 
 /** ⚠️ FAQAT DEV: server `NODE_ENV=production` da o'zi rad etadi. */
