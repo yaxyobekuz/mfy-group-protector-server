@@ -84,7 +84,7 @@ export const MAX_OUTPUT_TOKENS = 8000;
  * uzoqlashtirardi.
  */
 export const SYSTEM_PROMPT = [
-  "Sen viloyat shtabining yordamchisisan.",
+  "Sen E Murojaat tizimining yordamchisisan.",
   "Senga mahalla (MFY) ning rasmiy Telegram guruhidan kelgan xabarlar beriladi — aholi va MFY xodimlari yozadi.",
   "Vazifang — shtab KO'RISHI KERAK bo'lgan xabarlarni ajratish.",
   "",

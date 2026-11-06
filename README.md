@@ -1,4 +1,4 @@
-# Viloyat shtabi — Server (API)
+# E Murojaat — Server (API)
 
 MFY (mahalla) Telegram guruhlaridagi muammolarni aniqlash tizimining
 ma'lumot va biznes-mantiq qatlami.
@@ -497,7 +497,7 @@ GOOGLE_CLIENT_ID=""      # WEB turidagi mijoz id'si, Android/iOS niki EMAS
 GOOGLE_IOS_CLIENT_ID=""  # iOS'da `aud` BOSHQA bo'ladi — alohida
 APPLE_CLIENT_ID="uz.mysrv.nazoratchi"   # BUNDLE ID, "Services ID" emas
 APPLE_TEAM_ID="" APPLE_KEY_ID=""        # revoke uchun
-APPLE_PRIVATE_KEY_PATH="/var/lib/viloyat-shtabi/AuthKey_XXXXXXXXXX.p8"
+APPLE_PRIVATE_KEY_PATH="/var/lib/e-murojaat/AuthKey_XXXXXXXXXX.p8"
 ```
 
 ⚠️ `.p8` kaliti **kod katalogidan tashqarida** va **`git` dan
@@ -515,7 +515,7 @@ SEED_OWNER_PASSWORD="<kuchli-tasodifiy>"   # `owner123` EMAS
 **Fayllar:**
 
 ```bash
-UPLOADS_DIR="/var/lib/viloyat-shtabi/uploads"   # KOD KATALOGIDAN TASHQARIDA
+UPLOADS_DIR="/var/lib/e-murojaat/uploads"   # KOD KATALOGIDAN TASHQARIDA
 ```
 
 ⚠️ Standart qiymat loyiha ichiga tushadi va konteyner qayta
@@ -524,7 +524,7 @@ qoladi: panelda murojaat ko'rinib turadi, **dalili** esa yo'q bo'ladi.
 
 ## Infratuzilma
 
-- [ ] **HTTPS** — `nazoratchi-ai-api.mysrv.uz` (nginx + certbot).
+- [ ] **HTTPS** — `api.e-murojaat.org` (nginx + certbot).
       Do'kon HTTP manzilni qabul qilmaydi; Apple ATS ham bloklaydi.
 - [ ] `CORS_ORIGINS` — panel manzili (`*` **emas**: panel
       `credentials: true` bilan ishlaydi va brauzer `*` + credentials
@@ -548,8 +548,8 @@ npm ci && npx prisma migrate deploy && npm run build && npm run start
 Kunlik, **ikkisi birga** — biri ikkinchisisiz ma'nosiz:
 
 ```bash
-pg_dump viloyat_shtabi            # murojaat yozuvlari
-tar -C /var/lib/viloyat-shtabi    # ularning DALILLARI (uploads)
+pg_dump e_murojaat            # murojaat yozuvlari
+tar -C /var/lib/e-murojaat    # ularning DALILLARI (uploads)
 ```
 
 ⚠️ **Bazani tiklab, fayllarni tiklamaslik** murojaatni dalilsiz

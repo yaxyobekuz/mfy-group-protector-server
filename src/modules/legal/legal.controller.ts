@@ -13,7 +13,7 @@
  *
  * ⚠️ MANZIL ODAM O'QIYDIGAN JOYDA TURADI: u App Store/Play Console
  * formasiga yoziladi va ilova ichida ko'rsatiladi.
- * `nazoratchi-ai-api.mysrv.uz/api/privacy` xunuk va "API" so'zi
+ * `api.e-murojaat.org/api/privacy` xunuk va "API" so'zi
  * tekshiruvchida "bu sahifa emas, endpoint" degan savol tug'dirardi.
  *
  * Shuning uchun marshrut `@Controller({ path: "", version: ... })` emas,
