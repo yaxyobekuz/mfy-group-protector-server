@@ -77,11 +77,22 @@ uzoqlashtirardi.
 yozishmasi va uni saqlab qolish kerak emas. Signal qoladi, chunki unga
 kerakli hamma narsa (matn, muallif, vaqt) ko'chirib olingan.
 
-### 7. Model nomi kodda
+### 7. Model nomi kodda, shlyuz manzili `.env` da
 
 `signals/ai/signal-ai.constants.ts`. Model almashtirish — kod
-o'zgarishi: u xulosaning sifatiga, narxiga va javob shakliga ta'sir
-qiladi. `.env` dan faqat `OPENAI_API_KEY` o'qiladi.
+o'zgarishi: u xulosaning sifatiga va javob shakliga ta'sir qiladi.
+
+Manzil esa `.env` dan (`AI_BASE_URL`): u **infratuzilma** — domen
+ko'chishi mumkin, model esa sifat masalasi va review'dan o'tishi kerak.
+
+### 8. AI — o'zimizning shlyuz
+
+Model `api.vircity.uz` da ishlaydi, chaqiruv **bepul**
+(`AI-SERVER-CHEATSHEET.md`). API OpenAI bilan **mos**, shuning uchun
+`openai` paketi qoladi va faqat `baseURL` qo'shiladi.
+
+⚠️ **Embedding yo'q** (`/embeddings` → 404): semantik qidiruv va RAG
+bu shlyuz ustida qurilmaydi.
 
 ---
 
@@ -109,7 +120,8 @@ Server: `http://localhost:4000/api`
 
 | | Bo'lmasa nima bo'ladi |
 |---|---|
-| `OPENAI_API_KEY` | Xabarlar to'planadi, **tahlil qilinmaydi**. Tizim ishlaydi |
+| `AI_API_KEY` | Xabarlar to'planadi, **tahlil qilinmaydi** (mobil taklif ham chiqmaydi). Tizim ishlaydi |
+| `AI_BASE_URL` | Standart qiymat: `https://api.vircity.uz/v1` |
 | `BOT_TOKEN` | Muammo javobi botga **yuborilmaydi**. Panelda ko'rinib turadi |
 
 ---

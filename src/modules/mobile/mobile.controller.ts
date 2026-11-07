@@ -196,8 +196,10 @@ export class MobileController {
   }
 
   /**
-   * ⚠️ AI CHEGARASI (`THROTTLE.AI`) — ENG QATTIQ, chunki har chaqiruv
-   * OpenAI hisobidan PUL yechadi. Fuqaro bo'yicha sanaladi
+   * ⚠️ AI CHEGARASI (`THROTTLE.AI`) — ENG QATTIQ: chaqiruv endi bepul
+   * (o'zimizning shlyuz), lekin shlyuz BIR DONA va uni to'ldirish
+   * boshqa fuqarolarni kuttirardi (`throttle.ts` dagi batafsil
+   * izoh). Fuqaro bo'yicha sanaladi
    * (`throttler.guard.ts`): NAT ortidagi qo'shnilar bir-birini
    * bloklamasligi uchun.
    */

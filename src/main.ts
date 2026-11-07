@@ -330,8 +330,13 @@ async function bootstrap(): Promise<void> {
   logger.log(`Muhit: ${env.nodeEnv}`);
   logger.log(`CORS: ${env.corsOrigins.join(", ")}`);
 
-  if (!env.openaiApiKey) {
-    logger.warn("OPENAI_API_KEY yo'q — guruh xabarlari to'planadi, tahlil qilinmaydi");
+  if (!env.aiApiKey) {
+    logger.warn("AI_API_KEY yo'q — guruh xabarlari to'planadi, tahlil qilinmaydi");
+  } else {
+    // ⚠️ MANZIL LOGGA CHIQADI: shlyuz manzili `.env` dan keladi va
+    // noto'g'ri qiymat 401/404 bo'lib ko'rinardi — ya'ni kalitni
+    // ayblab, sababini (manzil) izlash uzoq davom etardi.
+    logger.log(`AI shlyuzi: ${env.aiBaseUrl}`);
   }
 }
 

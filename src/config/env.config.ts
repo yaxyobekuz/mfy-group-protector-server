@@ -99,12 +99,26 @@ export const env = {
   },
 
   /**
+   * AI SHLYUZI — O'ZIMIZNING SERVER (`api.vircity.uz`).
+   *
    * ⚠️ MAJBURIY EMAS. Kalit bo'lmasa tizim ISHLAYDI: guruh xabarlari
    * to'planadi, lekin tahlil qilinmaydi. Bu fon ishi — uni majburiy
    * qilish AI'siz ishlatmoqchi bo'lgan tashkilotga tizimni butunlay
    * yopib qo'yardi.
+   *
+   * ⚠️ NOMI `OPENAI_*` EMAS, `AI_*`: endi provayder OpenAI emas,
+   * o'zimizning shlyuz. Nomi eskicha qolsa, keyingi o'qigan odam
+   * `platform.openai.com` dan kalit izlab, "kalit to'g'ri, lekin
+   * ishlamayapti" holatiga tushardi.
+   *
+   * ⚠️ `aiBaseUrl` STANDART QIYMATGA EGA va shuning uchun `.env` da
+   * bo'lmasa ham ishlaydi. Lekin u KODDA MUHRLANMAGAN: shlyuz manzili
+   * — INFRATUZILMA (domen ko'chishi mumkin), model nomi esa SIFAT
+   * masalasi. Shuning uchun manzil `.env` dan, model nomi esa
+   * kodda qoladi (`signal-ai.constants.ts`).
    */
-  openaiApiKey: optional("OPENAI_API_KEY"),
+  aiApiKey: optional("AI_API_KEY"),
+  aiBaseUrl: process.env.AI_BASE_URL?.trim() || "https://api.vircity.uz/v1",
 
   /**
    * BOT KALITI — bot serverga shu bilan murojaat qiladi.

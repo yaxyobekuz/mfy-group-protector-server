@@ -28,6 +28,7 @@ import {
   MAX_SIGNALS,
   MAX_SUMMARY,
   MODEL,
+  SIGNALS_SCHEMA,
   SYSTEM_PROMPT,
 } from "./signal-ai.constants";
 
@@ -82,7 +83,7 @@ export class SignalAiService {
    * ishlaydi) — faqat avtomatik tahlil bo'lmaydi.
    */
   isEnabled(): boolean {
-    return Boolean(env.openaiApiKey);
+    return Boolean(env.aiApiKey);
   }
 
   /** Model nomi — panelda "qaysi model ishlayapti" deb ko'rsatiladi. */
@@ -116,13 +117,32 @@ export class SignalAiService {
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: this.buildUserText(batch) },
           ],
-          // ⚠️ JSON REJIMI MAJBURIY: bo'lmasa model javobni
-          // ```json ... ``` bloki ichida qaytarib, `JSON.parse`
-          // yiqilardi.
-          response_format: { type: "json_object" },
-          // ⚠️ `temperature` YUBORILMAYDI — 5.x modellari uni qabul
-          // qilmaydi va so'rov 400 bilan rad etilardi.
-          max_completion_tokens: MAX_OUTPUT_TOKENS,
+          // ⚠️ JSON SXEMASI, `json_object` EMAS. Shlyuzda
+          // TEKSHIRILGANI — `json_schema` (cheat sheet, §6);
+          // `json_object` rejimi esa tekshirilmagan va shlyuz uni
+          // rad etsa tahlil BUTUNLAY ishlamay qolardi. Sxema
+          // berilganda javob shakli kafolatlanadi va `JSON.parse`
+          // ```json``` bloki ustida yiqilmaydi.
+          //
+          // ⚠️ SXEMA QIYMATNI MAJBURLAMAYDI, FAQAT SHAKLNI (cheat
+          // sheet, §6): `kind` ga `enum` berilgan bo'lsa ham model
+          // begona qiymat qaytarishi mumkin — shuning uchun
+          // `normalizeSignal` tekshiruvi O'RNIDA QOLADI.
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "signals",
+              schema: SIGNALS_SCHEMA,
+            },
+          },
+          // ⚠️ `max_tokens`, `max_completion_tokens` EMAS: shlyuzda
+          // TIRIK TEKSHIRILGAN (2026-11-07) — `max_tokens` qabul
+          // qilinadi. Yangi nom e'tiborsiz qoldirilsa, javob
+          // shlyuzning o'z standartida kesilardi.
+          //
+          // ⚠️ `temperature` YUBORILMAYDI — izoh konstantalar
+          // faylida.
+          max_tokens: MAX_OUTPUT_TOKENS,
         },
         { timeout: AI_TIMEOUT_MS, maxRetries: AI_MAX_RETRIES },
       );
@@ -164,9 +184,23 @@ export class SignalAiService {
 
   // ───────────────────────────────────────────────────────────────
 
+  /**
+   * ⚠️ `baseURL` MAJBURIY: SDK standart holda `api.openai.com` ga
+   * boradi. Berilmasa bizning kalit begona serverga yuborilardi va
+   * xato 401 bo'lib ko'rinardi — ya'ni "kalit noto'g'ri" deb izlab,
+   * sababini (manzil) topish qiyin bo'lardi.
+   *
+   * ⚠️ SDK O'ZGARMAYDI: shlyuz OpenAI bilan MOS (cheat sheet, §3),
+   * ya'ni `openai` paketi o'z joyida qoladi va faqat manzil
+   * almashadi. Qo'lda `fetch` yozish SSE'ni, qayta urinishni va
+   * timeout'ni qaytadan yozishni talab qilardi.
+   */
   private getClient(): OpenAI | null {
-    if (!env.openaiApiKey) return null;
-    this.client ??= new OpenAI({ apiKey: env.openaiApiKey });
+    if (!env.aiApiKey) return null;
+    this.client ??= new OpenAI({
+      apiKey: env.aiApiKey,
+      baseURL: env.aiBaseUrl,
+    });
     return this.client;
   }
 
@@ -228,7 +262,21 @@ export class SignalAiService {
     // signal "kimdir nimadir dedi" bo'lib qolardi va tekshirib
     // bo'lmasdi. Model o'ylab topgan `messageId` ham shu yerda
     // ushlanadi.
-    const messageId = String(raw.messageId ?? "").trim();
+    //
+    // ⚠️ BOSHIDAGI `#` OLIB TASHLANADI. `qwen3.5` raqamni ro'yxatda
+    // ko'rgan shaklida — `"#102"` deb qaytaradi (shlyuzda 3/3
+    // takrorlangan), navbat kaliti esa YALANG'OCH `"102"`. Tozalanmasa
+    // `byMessageId.get()` HAR DOIM bo'sh qaytarib, HAMMA signal
+    // tashlanardi va buni topish deyarli imkonsiz bo'lardi:
+    //   - AI chaqiruvi MUVAFFAQIYATLI (xato yo'q, log jim),
+    //   - xabarlar `analyzedAt` bilan belgilanadi (navbat o'smaydi),
+    //   - panelda esa "0 signal" — ya'ni "guruhda muammo yo'q" degan
+    //     XULOSAGA o'xshab ko'rinardi.
+    // Promptda ham aytilgan, lekin prompt KAFOLAT EMAS — tekshiruv
+    // shu yerda.
+    const messageId = String(raw.messageId ?? "")
+      .trim()
+      .replace(/^#/, "");
     const source = byMessageId.get(messageId);
     if (!source) return null;
 

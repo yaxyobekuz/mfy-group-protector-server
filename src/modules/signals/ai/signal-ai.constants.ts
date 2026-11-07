@@ -2,25 +2,38 @@
  * AI TAHLILINING O'ZGARMAS QIYMATLARI VA PROMPTI.
  *
  * ⚠️ MODEL NOMI KODDA, SOZLAMADA EMAS. Model almashtirish — kod
- * o'zgarishi: u xulosaning sifatiga, narxiga va javob shakliga ta'sir
- * qiladi, ya'ni review'dan o'tishi kerak. `.env` yoki panel
- * sozlamasiga chiqarilsa, kimdir uni tasodifan almashtirib, butun
- * tahlil jim buzilishi mumkin edi. `.env` dan faqat `OPENAI_API_KEY`
- * o'qiladi.
+ * o'zgarishi: u xulosaning sifatiga va javob shakliga ta'sir qiladi,
+ * ya'ni review'dan o'tishi kerak. `.env` yoki panel sozlamasiga
+ * chiqarilsa, kimdir uni tasodifan almashtirib, butun tahlil jim
+ * buzilishi mumkin edi. `.env` dan faqat `AI_API_KEY` va shlyuz
+ * manzili (`AI_BASE_URL`) o'qiladi.
  *
- * ⚠️ NIMA UCHUN "NANO": bu ish kuniga ~48 marta va har safar o'nlab
- * xabar bilan ishlaydi. Vazifa esa og'ir emas — "bu gap shikoyatmi"
- * degan TASNIFLASH. Katta model bu yerda pulni bir necha o'n barobar
- * oshirib, aniqlikka deyarli qo'shmasdi.
+ * ⚠️ SHLYUZDA BITTA MODEL BOR. `GET /models` bitta yozuv qaytaradi
+ * (`qwen3.5:122b`) — ya'ni "arzon model tanlash" masalasi endi YO'Q
+ * va "nano" mulohazasi ham kuchini yo'qotdi: tanlov yo'q. Model
+ * O'ZIMIZNING serverda ishlaydi, chaqiruv PUL YECHMAYDI.
+ *
+ * ⚠️ TEZLIK CHEGARASI ESA O'RNIDA QOLADI (`throttle.ts`): pul
+ * sarflanmasa ham shlyuz BIR DONA va uni skript bilan to'ldirish
+ * butun tahlilni (va mobil taklifni) sekinlashtirardi.
  */
 
-/** Tasnif modeli — arzon va tez. */
-export const MODEL = "gpt-5-nano";
+import { SignalKind, SignalSeverity } from "@prisma/client";
 
 /**
- * ⚠️ `temperature` YUBORILMAYDI. 5.x oilasidagi modellar uni QABUL
- * QILMAYDI va so'rov 400 bilan rad etilardi — ya'ni tahlil butunlay
- * ishlamay qolardi. Buni faqat log'dan bilib olish mumkin.
+ * Tasnif modeli — shlyuzdagi YAGONA model (ko'rish/matn ikkisi ham).
+ *
+ * ⚠️ `AI-SERVER-CHEATSHEET.md` bo'yicha tekshirilgan.
+ */
+export const MODEL = "qwen3.5:122b";
+
+/**
+ * ⚠️ `temperature` YUBORILMAYDI. Avvalgi sabab (5.x modellari uni
+ * qabul qilmaydi) endi tegishli emas, lekin yuborMASLIK qarori
+ * ATAYLAB saqlanadi: bu TASNIFLASH ishi va tasodifiylik bu yerda
+ * foyda bermaydi — bir xil xabar har aylanishda bir xil toifaga
+ * tushishi kerak. Shlyuzning standart qiymati bizning ishimizga
+ * mos.
  */
 export const AI_TIMEOUT_MS = 60_000;
 export const AI_MAX_RETRIES = 1;
@@ -48,18 +61,24 @@ export const MAX_SIGNALS = 10;
 export const MAX_SUMMARY = 300;
 
 /**
- * ⚠️ BU CHEGARA REASONING TOKENLARINI HAM O'Z ICHIGA OLADI.
- * 5.x "nano" modellari javobdan OLDIN ichki o'ylashga token
- * sarflaydi (oddiy so'rovda ham ~1000 ta) va u shu limitdan
+ * ⚠️ KAMAYTIRMANG — sabab O'ZGARDI, lekin chegara O'SHA QOLADI.
+ *
+ * Avvalgi sabab: 5.x "nano" javobdan OLDIN ichki o'ylashga token
+ * sarflardi va u shu limitdan yeyilardi. `qwen3.5` da bu xatti-harakat
+ * KAFOLATLANMAGAN — ya'ni "endi o'ylash yo'q, demak kamaytirsak
+ * bo'ladi" deb xulosa qilish MUMKIN EMAS: qwen oilasi ham javobdan
+ * oldin `<think>` bloki chiqarishi mumkin va u ham shu limitdan
  * yeyiladi.
  *
- * 2000 bo'lganda 60 tagacha xabarli to'plamda o'ylash limitni
- * to'ldirib, JSON javobi YARMIDA kesilardi — `finish_reason:
- * "length"`. Natijada guruh har aylanishda "tahlil qilinmadi"
- * bo'lib, signal UMUMAN chiqmasdi (navbat esa o'sib borardi).
+ * Qiymat saqlanadigan ASOSIY sabab esa modeldan mustaqil: 60 tagacha
+ * xabarli to'plamda 10 tagacha signal + zaxira kerak. Past qiymat
+ * JSON javobini YARMIDA kesib (`finish_reason: "length"`), guruhni har
+ * aylanishda "tahlil qilinmadi" holatida qoldirardi va navbat o'sib
+ * borardi.
  *
- * ⚠️ KAMAYTIRMANG. Javobning o'zi qisqa (~10 qator JSON), lekin
- * zaxira o'ylash uchun kerak.
+ * ⚠️ KONTEKST OYNASI TEKSHIRILMAGAN (`AI-SERVER-CHEATSHEET.md` →
+ * "Not verified"): shlyuz bu qiymatni rad etsa, xato logga chiqadi
+ * va to'plam navbatda qoladi — jim yo'qolmaydi.
  */
 export const MAX_OUTPUT_TOKENS = 8000;
 
@@ -82,6 +101,13 @@ export const MAX_OUTPUT_TOKENS = 8000;
  * tusha olmaydi. Avval model qisqa sarlavha yozardi va u har safar
  * "...aytilgan" degan o'ramga aylanib, odamning o'z gapini
  * uzoqlashtirardi.
+ *
+ * ⚠️ `qwen3.5` KO'RSATMANI TAXMINAN BAJARADI (cheat sheet, §3: "reply
+ * with one word: working" so'roviga "Yes" deb javob bergan). Ya'ni
+ * prompt — KAFOLAT EMAS: javobning shakli `signal-ai.service.ts`
+ * dagi `normalizeSignal` da QAYTA tekshiriladi (begona `kind`,
+ * o'ylab topilgan `messageId` tashlanadi). Promptni kuchaytirish
+ * o'sha tekshiruvning o'rnini BOSMAYDI — ikkisi birga ishlaydi.
  */
 export const SYSTEM_PROMPT = [
   "Sen viloyat shtabining yordamchisisan.",
@@ -124,7 +150,12 @@ export const SYSTEM_PROMPT = [
   "  lekin o'tkazib yuborilgan shikoyat butunlay yo'qoladi.",
   "- Bir mavzudagi bir nechta xabarni BITTA signalga birlashtir.",
   "- Har xil mavzudagi shikoyatlarni ALOHIDA signal qil.",
-  '- "messageId" — signal asos bo\'lgan xabarning raqami (ro\'yxatdagi "#" qiymati).',
+  // ⚠️ "FAQAT RAQAM" ALOHIDA AYTILADI: avval "ro'yxatdagi # qiymati"
+  // deyilgan edi va model raqamni `"#102"` deb, # belgisi BILAN
+  // qaytarardi (shlyuzda tekshirilgan). Kodda ham tozalanadi
+  // (`normalizeSignal`) — ikkisi birga ishlaydi.
+  '- "messageId" — signal asos bo\'lgan xabarning raqami: FAQAT RAQAM,',
+  '  "#" belgisisiz. Masalan "#102" xabari uchun "102" deb yoz.',
   '- "severity": "high" — odamning sog\'lig\'i yoki xavfsizligi, bolalar,',
   "  kommunal to'liq uzilish, takrorlanayotgan javobsizlik yoki xodim ustidan",
   '  jiddiy ayblov; "normal" — oddiy shikoyat/taklif; "low" — mayda izoh.',
@@ -138,3 +169,47 @@ export const SYSTEM_PROMPT = [
   "Javobni FAQAT shu JSON shaklida qaytar (boshqa hech narsa yozma):",
   '{"signals":[{"messageId":"123","kind":"complaint","severity":"normal"}]}',
 ].join("\n");
+
+/**
+ * JAVOB SXEMASI — `response_format: json_schema` uchun.
+ *
+ * ⚠️ NIMA UCHUN SXEMA, `json_object` EMAS: shlyuzda TEKSHIRILGANI —
+ * `json_schema` (`AI-SERVER-CHEATSHEET.md`, §6). `json_object` rejimi
+ * tekshirilmagan va shlyuz uni rad etsa tahlil BUTUNLAY ishlamay
+ * qolardi.
+ *
+ * ⚠️ SXEMA SHAKLNI BERADI, QIYMATNI EMAS. Cheat sheet §6 da aniq
+ * yozilgan: probe'da model sxemaga mos JSON qaytargan, lekin `enum`
+ * dan TASHQARI erkin matn bergan. Shuning uchun `kind` va `severity`
+ * ro'yxati bu yerda HAM, promptda HAM, `normalizeSignal` da HAM
+ * bor — uchtasi bir-birining o'rnini bosmaydi:
+ *
+ *   prompt  → modelga nima kerakligini AYTADI
+ *   sxema   → javob SHAKLINI (maydonlar, turlar) kafolatlaydi
+ *   kod     → QIYMATNI tekshiradi (yagona ISHONCHLI nuqta)
+ *
+ * ⚠️ `enum` RO'YXATI `SignalKind` / `SignalSeverity` DAN OLINADI —
+ * qo'lda yozilsa, Prisma'da yangi toifa qo'shilganda ikkisi jimgina
+ * ajralib ketardi.
+ */
+export const SIGNALS_SCHEMA = {
+  type: "object",
+  properties: {
+    signals: {
+      type: "array",
+      maxItems: MAX_SIGNALS,
+      items: {
+        type: "object",
+        properties: {
+          messageId: { type: "string" },
+          kind: { type: "string", enum: Object.values(SignalKind) },
+          severity: { type: "string", enum: Object.values(SignalSeverity) },
+        },
+        required: ["messageId", "kind", "severity"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["signals"],
+  additionalProperties: false,
+} as const;

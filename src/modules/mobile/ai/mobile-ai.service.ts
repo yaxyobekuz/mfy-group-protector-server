@@ -20,6 +20,7 @@ import {
   AI_TIMEOUT_MS,
   MAX_OUTPUT_TOKENS,
   MODEL,
+  SUGGESTION_SCHEMA,
   SYSTEM_PROMPT,
 } from "./mobile-ai.constants";
 
@@ -50,12 +51,20 @@ export class MobileAiService {
   }
 
   isEnabled(): boolean {
-    return Boolean(env.openaiApiKey);
+    return Boolean(env.aiApiKey);
   }
 
+  /**
+   * ⚠️ `baseURL` MAJBURIY — `signal-ai.service.ts#getClient` bilan
+   * AYNI sabab: berilmasa SDK `api.openai.com` ga borib, xato "kalit
+   * noto'g'ri" (401) bo'lib ko'rinardi.
+   */
   private getClient(): OpenAI | null {
-    if (!env.openaiApiKey) return null;
-    this.client ??= new OpenAI({ apiKey: env.openaiApiKey });
+    if (!env.aiApiKey) return null;
+    this.client ??= new OpenAI({
+      apiKey: env.aiApiKey,
+      baseURL: env.aiBaseUrl,
+    });
     return this.client;
   }
 
@@ -82,12 +91,23 @@ export class MobileAiService {
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: this.buildUserText(body, categories) },
           ],
-          // ⚠️ JSON REJIMI MAJBURIY: bo'lmasa model javobni ```json```
-          // bloki ichida qaytarib, `JSON.parse` yiqilardi.
-          response_format: { type: "json_object" },
-          // ⚠️ `temperature` YUBORILMAYDI — 5.x modellari uni qabul
-          // qilmaydi va so'rov 400 bilan rad etilardi.
-          max_completion_tokens: MAX_OUTPUT_TOKENS,
+          // ⚠️ JSON SXEMASI, `json_object` EMAS — shlyuzda
+          // tekshirilgani shu (cheat sheet, §6). Sxema SHAKLNI
+          // beradi, QIYMATNI emas: `categoryId` ning haqiqiyligi
+          // pastda `valid` to'plami bilan tekshiriladi.
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "suggestion",
+              schema: SUGGESTION_SCHEMA,
+            },
+          },
+          // ⚠️ `max_tokens`, `max_completion_tokens` EMAS: shlyuzda
+          // TIRIK TEKSHIRILGAN (2026-11-07).
+          //
+          // ⚠️ `temperature` YUBORILMAYDI — izoh konstantalar
+          // faylida.
+          max_tokens: MAX_OUTPUT_TOKENS,
         },
         { timeout: AI_TIMEOUT_MS, maxRetries: AI_MAX_RETRIES },
       );

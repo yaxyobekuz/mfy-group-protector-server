@@ -115,10 +115,17 @@ export const THROTTLER_CONFIG: ThrottlerModuleOptions = {
       /**
        * AI TAHLILI — daqiqada 8.
        *
-       * ⚠️ ENG QATTIQ CHEGARA, CHUNKI ENG QIMMAT: har chaqiruv OpenAI
-       * hisobidan pul yechadi. Chegarasiz qoldirilsa, bitta skript
-       * bir kechada butun oylik budjetni yeb qo'yardi va buni
-       * hisob-fakturadan bilib olardik.
+       * ⚠️ ENG QATTIQ CHEGARA. Avvalgi sabab PUL edi (har chaqiruv
+       * OpenAI hisobidan yechardi); endi model O'ZIMIZNING shlyuzda
+       * va chaqiruv BEPUL — lekin chegara SAQLANADI, chunki sabab
+       * O'ZGARDI, YO'QOLMADI:
+       *
+       * shlyuz BIR DONA va uni butun tashkilot bo'lishadi. Bitta
+       * skript uni to'ldirsa, guruh tahlili (fon ishi) ham, boshqa
+       * fuqarolarning taklifi ham sekinlashardi — ya'ni narx
+       * hisob-fakturada emas, BOSHQA ODAMNING kutishida ko'rinardi.
+       *
+       * ⚠️ "Bepul bo'ldi, chegara kerak emas" DEB OLIB TASHLAMANG.
        *
        * ⚠️ FUQARO BO'YICHA (IP emas — `mobile-throttler.guard.ts`):
        * bitta uy yoki mobil operator NAT ortida o'nlab fuqaro bir IP

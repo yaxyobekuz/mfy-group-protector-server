@@ -73,7 +73,7 @@ export class SignalsJob implements OnModuleInit {
       // ⚠️ BIR MARTA AYTILADI, har aylanishda emas: har 30 daqiqada
       // ogohlantirish yozilsa log shunchaki to'lib ketardi.
       this.logger.warn(
-        "OPENAI_API_KEY yo'q — guruh xabarlari to'planadi, lekin tahlil qilinmaydi",
+        "AI_API_KEY yo'q — guruh xabarlari to'planadi, lekin tahlil qilinmaydi",
       );
       return;
     }
