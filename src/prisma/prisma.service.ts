@@ -7,7 +7,7 @@
  * yerda baza BITTA: hududiy ajratish ma'lumot darajasida (FK +
  * `scope.util.ts`), ulanish darajasida emas.
  *
- * ⚠️ NIMA UCHUN SHUNDAY SODDA: viloyat shtabi — bitta tashkilot.
+ * ⚠️ NIMA UCHUN SHUNDAY SODDA: E Murojaat — bitta tashkilot.
  * Multi-tenant qatlami qo'shilsa, u darhol har so'rovga tushadigan,
  * lekin hech qachon ikkinchi tenantga ega bo'lmaydigan murakkablik
  * bo'lib qolardi.

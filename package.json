@@ -1,7 +1,7 @@
 {
-  "name": "viloyat-shtabi-server",
+  "name": "e-murojaat-server",
   "version": "0.1.0",
-  "description": "Viloyat shtabi — MFY guruhlaridagi muammolarni aniqlash tizimi (API)",
+  "description": "E Murojaat — MFY guruhlaridagi muammolarni aniqlash tizimi (API)",
   "private": true,
   "scripts": {
     "build": "nest build",

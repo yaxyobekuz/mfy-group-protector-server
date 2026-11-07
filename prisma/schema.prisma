@@ -1,5 +1,5 @@
 // ╔══════════════════════════════════════════════════════════════════════╗
-// ║  VILOYAT SHTABI — MFY guruhlaridagi muammolarni aniqlash tizimi      ║
+// ║  E MUROJAAT — MFY guruhlaridagi muammolarni aniqlash tizimi          ║
 // ╚══════════════════════════════════════════════════════════════════════╝
 //
 // Tizimning mohiyati bir gapda: viloyatdagi MAHALLA (MFY) Telegram
@@ -35,7 +35,7 @@
 //    yozilmaydi). Shuning uchun `mahallaId` QO'LDA qo'yiladi va u NULL
 //    bo'lishi mumkin — "hali biriktirilmagan".
 //
-// ⚠️ 3. HUDUDIY KO'RINISH — XODIM DARAJASIDA. Viloyat shtabi xodimi
+// ⚠️ 3. HUDUDIY KO'RINISH — XODIM DARAJASIDA. E Murojaat xodimi
 //    hammasini ko'radi, tuman xodimi faqat o'z tumanini. Bu
 //    `User.scopeKind` + `User.districtId` bilan hal qilinadi va
 //    HAR SO'ROVDA server tomonida qo'llanadi (`scope.util.ts`) —
@@ -43,7 +43,7 @@
 //
 // ⚠️ 4. BAZA BITTA VA TOZA. study-tracker'dagi multi-tenant (platform +
 //    br_<kod> schema'lari, AsyncLocalStorage Proxy) bu yerda YO'Q va
-//    kerak ham emas: viloyat shtabi — BITTA tashkilot. Hududiy ajratish
+//    kerak ham emas: E Murojaat — BITTA tashkilot. Hududiy ajratish
 //    ma'lumot darajasida (FK), ulanish darajasida emas.
 //
 // ── SANA VA VAQT ──────────────────────────────────────────────────────
@@ -819,7 +819,7 @@ model Settings {
   id String @id @default("singleton")
 
   /// Viloyat/tashkilot nomi — hisobot sarlavhasida.
-  orgName String @default("Viloyat shtabi") @map("org_name")
+  orgName String @default("E Murojaat") @map("org_name")
 
   /// ── AI TAHLILI ──────────────────────────────────────────────────
   ///

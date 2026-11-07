@@ -209,7 +209,7 @@ CREATE TABLE "issue_comments" (
 -- CreateTable
 CREATE TABLE "settings" (
     "id" TEXT NOT NULL DEFAULT 'singleton',
-    "org_name" TEXT NOT NULL DEFAULT 'Viloyat shtabi',
+    "org_name" TEXT NOT NULL DEFAULT 'E Murojaat',
     "ai_enabled" BOOLEAN NOT NULL DEFAULT true,
     "ai_interval_minutes" INTEGER NOT NULL DEFAULT 30,
     "ai_max_messages_per_run" INTEGER NOT NULL DEFAULT 300,

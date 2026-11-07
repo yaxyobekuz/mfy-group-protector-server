@@ -120,7 +120,7 @@ function setupSwagger(app: NestExpressApplication, logger: Logger): void {
   }
 
   const config = new DocumentBuilder()
-    .setTitle("Viloyat shtabi — API")
+    .setTitle("E Murojaat — API")
     .setDescription(
       "MFY guruhlaridagi muammolarni aniqlash tizimi va fuqaro murojaatlari",
     )
@@ -230,8 +230,8 @@ async function bootstrap(): Promise<void> {
    * do'kon formasiga va ilova ichiga yoziladi, ya'ni ODAM
    * O'QIYDIGAN manzil bo'lishi kerak:
    *
-   *     nazoratchi-ai-api.mysrv.uz/privacy        ✓
-   *     nazoratchi-ai-api.mysrv.uz/api/privacy    ✗ ("API" — sahifa emas)
+   *     api.e-murojaat.org/privacy        ✓
+   *     api.e-murojaat.org/api/privacy    ✗ ("API" — sahifa emas)
    *
    * ⚠️ `legal.css` HAM ISTISNODA: sahifa uni `/legal.css` deb
    * so'raydi va prefiks ostida qolsa, bezak YUKLANMASDI — xato esa

@@ -175,7 +175,15 @@ export const env = {
    * bloklardi.
    */
   googleClientId: optional("GOOGLE_CLIENT_ID"),
-  googleIosClientId: optional("GOOGLE_IOS_CLIENT_ID"),
+  /**
+   * ⚠️ STANDART QIYMAT KODDA: iOS mijoz id'si SIR EMAS (u har iPhone
+   * ilovasining `Info.plist` ida ochiq turadi). `.env` da bo'lmasa
+   * iPhone'dan Google kirishi deploydan keyin jimgina 401 berardi.
+   * `.env` dagi qiymat baribir ustun.
+   */
+  googleIosClientId:
+    optional("GOOGLE_IOS_CLIENT_ID") ??
+    "655625636750-cdb725gm88rf8gte9bcubcdmc2joomod.apps.googleusercontent.com",
 
   /**
    * MOBIL ILOVA (Flutter) — iOS'da "SIGN IN WITH APPLE".
@@ -197,7 +205,12 @@ export const env = {
    * beradi), Google va mini-ilova ishlayveradi — kirish yo'llari
    * bir-biriga bog'liq emas.
    */
-  appleClientId: optional("APPLE_CLIENT_ID"),
+  //
+  // ⚠️ STANDART — ILOVA BUNDLE ID'SI: bu SIR EMAS va ilova bilan
+  // birga o'zgarmaydi. `.env` ga yozish unutilgan production'da
+  // Apple kirishi 503 berardi va App Store review'da ilova rad
+  // etilardi (reviewer kira olmasdi). `.env` dagi qiymat ustun.
+  appleClientId: optional("APPLE_CLIENT_ID") ?? "uz.mysrv.nazoratchi",
 
   /**
    * APPLE RUXSATINI BEKOR QILISH (`/auth/revoke`) UCHUN KALITLAR.
