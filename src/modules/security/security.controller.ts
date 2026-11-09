@@ -31,6 +31,7 @@ import {
 import type { ScopeContext } from "../../common/scope.util";
 import { SecurityService } from "./security.service";
 import {
+  BulkGuardDto,
   ListSecurityQuery,
   ReportThreatDto,
   SetGuardDto,
@@ -91,6 +92,25 @@ export class SecurityController {
   @RequirePermissions("security.view")
   stats(@CurrentUser() user: RequestUser) {
     return this.security.stats(toScope(user));
+  }
+
+  /**
+   * OMMAVIY QALQON — filtrdan o'tgan barcha guruh uchun.
+   *
+   * ⚠️ BU MARSHRUT `groups/:chatId/guard` DAN OLDIN TURISHI SHART.
+   * Ikkalasi ham uch bo'lakli va Nest BIRINCHI mos kelganini
+   * oladi: pastda tursa, `/security/groups/bulk/guard` so'rovi
+   * `chatId = "bulk"` bo'lib yakka handler'ga tushardi va
+   * "Guruh topilmadi" degan chalg'ituvchi xato berardi.
+   */
+  @Patch("groups/bulk/guard")
+  @RequirePermissions("security.guard")
+  bulkSetGuard(
+    @Body() dto: BulkGuardDto,
+    @CurrentUser() user: RequestUser,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.security.bulkSetGuard(dto, toScope(user), user.id, ip ?? undefined);
   }
 
   /**

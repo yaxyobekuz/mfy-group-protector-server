@@ -106,3 +106,28 @@ export class SetGuardDto {
   @IsBoolean({ message: "guardEnabled true yoki false bo'lishi kerak" })
   guardEnabled!: boolean;
 }
+
+/**
+ * OMMAVIY QALQON — ekrandagi FILTR bo'yicha.
+ *
+ * ⚠️ FILTR MAYDONLARI GURUHLAR RO'YXATINIKI (`BulkOfficialDto`
+ * bilan AYNI shakl): panel bitta ro'yxatni ko'rsatadi va ikki
+ * amal o'sha ro'yxat ustida ishlaydi. Shakl boshqacha bo'lsa,
+ * "qalqon boshqa guruhlarga tushdi" holati chiqardi.
+ *
+ * ⚠️ MFY SHARTI BU YERDA YO'Q — qalqon `isOfficial` dan MUSTAQIL
+ * (fayl boshidagi doktrina): hududsiz guruhdagi odamni ham
+ * virusdan himoya qilish mumkin.
+ */
+export class BulkGuardDto {
+  @toBool()
+  @IsBoolean({ message: "guardEnabled true yoki false bo'lishi kerak" })
+  guardEnabled!: boolean;
+
+  @IsOptional() @toBool() @IsBoolean() filterIsOfficial?: boolean;
+  @IsOptional() @IsString() filterMahallaId?: string;
+  @IsOptional() @toBool() @IsBoolean() filterUnassigned?: boolean;
+  @IsOptional() @IsString() @MaxLength(120) filterSearch?: string;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) expectedCount?: number;
+}

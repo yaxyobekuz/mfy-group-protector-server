@@ -31,6 +31,7 @@ import type { ScopeContext } from "../../common/scope.util";
 import { GroupsService } from "./groups.service";
 import {
   AssignMahallaDto,
+  BulkOfficialDto,
   CaptureMessageDto,
   ListGroupsQuery,
   MembershipDto,
@@ -102,6 +103,21 @@ export class GroupsController {
   @RequirePermissions("groups.view")
   stats(@CurrentUser() user: RequestUser) {
     return this.groups.getStats(toScope(user));
+  }
+
+  /**
+   * OMMAVIY KUZATUV — filtrdan o'tgan barcha guruh uchun.
+   *
+   * ⚠️ BU MARSHRUT `:chatId/official` DAN OLDIN TURISHI SHART.
+   * Ikkalasi ham ikki bo'lakli va Nest BIRINCHI mos kelganini
+   * oladi: pastda tursa, `/groups/bulk/official` so'rovi
+   * `chatId = "bulk"` bo'lib yakka handler'ga tushardi va
+   * "Guruh topilmadi" degan chalg'ituvchi xato berardi.
+   */
+  @Patch("bulk/official")
+  @RequirePermissions("groups.official")
+  bulkSetOfficial(@Body() dto: BulkOfficialDto, @CurrentUser() user: RequestUser) {
+    return this.groups.bulkSetOfficial(dto, toScope(user));
   }
 
   /**

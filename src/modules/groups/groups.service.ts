@@ -28,6 +28,7 @@ import {
 
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../../common/audit.service";
+import { groupListWhere } from "../../common/group-filter.util";
 import {
   canTouchDistrict,
   isProvinceWide,
@@ -37,6 +38,7 @@ import {
 import { paginate, type Paginated } from "../../common/dto/pagination.dto";
 import type {
   AssignMahallaDto,
+  BulkOfficialDto,
   CaptureMessageDto,
   ListGroupsQuery,
   MembershipDto,
@@ -207,25 +209,7 @@ export class GroupsService {
   // ═══════════════════════════════════════════════════════════════
 
   async list(scope: ScopeContext, query: ListGroupsQuery): Promise<Paginated<unknown>> {
-    const where = {
-      // ⚠️ `includeUnassigned: true` — MFY biriktirilmagan guruhlar
-      // ko'rinishi KERAK: aks holda ular jim turib qolardi va hech
-      // kim ularni biriktirmasdi. Tuman xodimi uchun bu faqat
-      // viloyat darajasida ochiladi (`scope.util.ts` izohi).
-      ...mahallaScopeWhere(scope, { includeUnassigned: isProvinceWide(scope) }),
-      ...(query.isOfficial !== undefined ? { isOfficial: query.isOfficial } : {}),
-      ...(query.mahallaId ? { mahallaId: query.mahallaId } : {}),
-      ...(query.unassigned ? { mahallaId: null } : {}),
-      ...(query.search
-        ? {
-            OR: [
-              { title: { contains: query.search, mode: "insensitive" as const } },
-              { username: { contains: query.search, mode: "insensitive" as const } },
-              { chatId: { contains: query.search } },
-            ],
-          }
-        : {}),
-    };
+    const where = groupListWhere(scope, query);
 
     const [groups, total] = await Promise.all([
       this.prisma.telegramGroup.findMany({
@@ -340,6 +324,131 @@ export class GroupsService {
     }
 
     return { chatId: updated.chatId, isOfficial: updated.isOfficial };
+  }
+
+  /**
+   * OMMAVIY KUZATUV — filtrdan o'tgan BARCHA guruh uchun.
+   *
+   * ⚠️ MFYSIZ GURUHLAR O'TKAZIB YUBORILADI, amal TO'XTAMAYDI.
+   * Yakka `setOfficial` ularni rad etadi (signallar hududsiz
+   * qolardi) va bu qoida bu yerda ham kuchda — lekin bitta
+   * biriktirilmagan guruh tufayli qolgan 40 tasini yoqmay qo'yish
+   * operatorni boshi berk ko'chaga olib borardi. Ular SANALADI va
+   * javobda qaytariladi: panel "3 tasi MFYsiz — o'tkazib
+   * yuborildi" deb aytadi, ya'ni holat JIM qolmaydi.
+   *
+   * ⚠️ O'CHIRISHDA BU CHEKLOV YO'Q: kuzatuvni to'xtatish uchun
+   * hudud kerak emas.
+   *
+   * ⚠️ AUDITGA BITTA YOZUV, har guruhga emas: 200 ta qator
+   * jurnalni o'qib bo'lmaydigan qilardi (`audit.service.ts`
+   * izohi — "hamma narsani yozish"). Qaysi guruhlar ekani `meta`
+   * ichida `chatIds` sifatida qoladi, ya'ni dalil yo'qolmaydi.
+   */
+  async bulkSetOfficial(dto: BulkOfficialDto, scope: ScopeContext) {
+    const where = groupListWhere(scope, {
+      isOfficial: dto.filterIsOfficial,
+      mahallaId: dto.filterMahallaId,
+      unassigned: dto.filterUnassigned,
+      search: dto.filterSearch,
+    });
+
+    const candidates = await this.prisma.telegramGroup.findMany({
+      where,
+      select: { chatId: true, mahallaId: true, isOfficial: true },
+    });
+
+    // ⚠️ RO'YXAT O'ZGARGAN BO'LSA RAD ETILADI: operator tasdiqlash
+    // oynasida ko'rgan raqam bilan amal paytidagi raqam boshqa
+    // bo'lsa, u o'zi ko'rmagan guruhni yoqib yuborardi.
+    if (dto.expectedCount !== undefined && dto.expectedCount !== candidates.length) {
+      throw new BadRequestException(
+        `Ro'yxat o'zgardi: tasdiqlashda ${dto.expectedCount} ta edi, hozir ${candidates.length} ta. Sahifani yangilab, qaytadan urinib ko'ring.`,
+      );
+    }
+
+    // ⚠️ HOLATI ALLAQACHON TO'G'RI BO'LGANLAR TEGILMAYDI: `officialAt`
+    // va `officialBy` qayta yozilsa, kuzatuv QACHON va KIM
+    // tomonidan yoqilgani — rozilik dalili — yo'qolardi.
+    const alreadySet = candidates.filter((g) => g.isOfficial === dto.isOfficial);
+    const pending = candidates.filter((g) => g.isOfficial !== dto.isOfficial);
+
+    const skippedNoMahalla = dto.isOfficial
+      ? pending.filter((g) => !g.mahallaId)
+      : [];
+    const targets = dto.isOfficial
+      ? pending.filter((g) => g.mahallaId)
+      : pending;
+
+    const chatIds = targets.map((g) => g.chatId);
+
+    if (chatIds.length === 0) {
+      return {
+        changed: 0,
+        unchanged: alreadySet.length,
+        skippedNoMahalla: skippedNoMahalla.length,
+        matched: candidates.length,
+      };
+    }
+
+    const now = new Date();
+
+    const { count } = await this.prisma.telegramGroup.updateMany({
+      where: { chatId: { in: chatIds } },
+      data: {
+        isOfficial: dto.isOfficial,
+        officialAt: dto.isOfficial ? now : null,
+        officialBy: dto.isOfficial ? scope.userId : null,
+      },
+    });
+
+    await this.audit.record({
+      userId: scope.userId,
+      action: dto.isOfficial ? "group.official_on_bulk" : "group.official_off_bulk",
+      entity: "TelegramGroup",
+      // ⚠️ `entityId` YO'Q: amal bitta guruhga tegishli emas va
+      // bittasining id'sini yozish jurnalda adashtirardi.
+      entityId: null,
+      meta: {
+        count,
+        chatIds,
+        skippedNoMahalla: skippedNoMahalla.map((g) => g.chatId),
+        filter: {
+          isOfficial: dto.filterIsOfficial,
+          mahallaId: dto.filterMahallaId,
+          unassigned: dto.filterUnassigned,
+          search: dto.filterSearch,
+        },
+      },
+    });
+
+    // ⚠️ BELGI OLINGANDA NAVBAT TOZALANADI — yakka `setOfficial`
+    // dagi bilan AYNI qoida: rozilik qaytarib olingandan keyin
+    // tahlil qilinmagan xabarni saqlab qolish "o'qimaymiz" degan
+    // qarorga qarshi bo'lardi.
+    let purgedMessages = 0;
+    if (!dto.isOfficial) {
+      const purged = await this.prisma.groupMessage.deleteMany({
+        where: { chatId: { in: chatIds }, analyzedAt: null },
+      });
+      purgedMessages = purged.count;
+    }
+
+    this.logger.log(
+      `[Groups] ommaviy kuzatuv ${dto.isOfficial ? "yoqildi" : "o'chirildi"}: ${count} guruh` +
+        (skippedNoMahalla.length > 0
+          ? `, ${skippedNoMahalla.length} tasi MFYsiz o'tkazib yuborildi`
+          : "") +
+        (purgedMessages > 0 ? `, ${purgedMessages} tahlilsiz xabar o'chirildi` : ""),
+    );
+
+    return {
+      changed: count,
+      unchanged: alreadySet.length,
+      skippedNoMahalla: skippedNoMahalla.length,
+      matched: candidates.length,
+      purgedMessages,
+    };
   }
 
   /**

@@ -22,10 +22,16 @@
  * BOG'LIQ EMAS.
  */
 
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../../common/audit.service";
+import { groupListWhere } from "../../common/group-filter.util";
 import {
   canTouchDistrict,
   signalScopeWhere,
@@ -33,6 +39,7 @@ import {
 } from "../../common/scope.util";
 import { paginate, type Paginated } from "../../common/dto/pagination.dto";
 import type {
+  BulkGuardDto,
   ListSecurityQuery,
   ReportThreatDto,
   SetGuardDto,
@@ -315,5 +322,104 @@ export class SecurityService {
     });
 
     return updated;
+  }
+
+  /**
+   * OMMAVIY QALQON — filtrdan o'tgan BARCHA guruh uchun.
+   *
+   * ⚠️ MFY SHARTI YO'Q, kuzatuv sharti ham yo'q: qalqon
+   * `isOfficial` dan MUSTAQIL (fayl boshidagi doktrina). Guruh
+   * kuzatuvga yopiq bo'lsa ham undagi odamlarni virusdan himoya
+   * qilish mumkin.
+   *
+   * ⚠️ QAMROV FILTRDAN KELADI (`groupListWhere`), har guruhga
+   * alohida `canTouchDistrict` emas: `updateMany` bitta so'rov va
+   * uning `where` i allaqachon qamrov bilan cheklangan. Yakka
+   * `setGuard` dagi tekshiruv O'RNIDA QOLADI — u id bilan keladi
+   * va ro'yxatdan o'tmaydi (CLAUDE.md: "Ruxsat ≠ qamrov").
+   *
+   * ⚠️ AUDITGA BITTA YOZUV, har guruhga emas — `bulkSetOfficial`
+   * bilan AYNI sabab: 200 qator jurnalni o'qib bo'lmaydigan
+   * qilardi. Guruhlar `meta.chatIds` da qoladi.
+   */
+  async bulkSetGuard(
+    dto: BulkGuardDto,
+    scope: ScopeContext,
+    actorId: string,
+    ip?: string,
+  ) {
+    const where = groupListWhere(scope, {
+      isOfficial: dto.filterIsOfficial,
+      mahallaId: dto.filterMahallaId,
+      unassigned: dto.filterUnassigned,
+      search: dto.filterSearch,
+    });
+
+    const candidates = await this.prisma.telegramGroup.findMany({
+      where,
+      select: { chatId: true, guardEnabled: true },
+    });
+
+    // ⚠️ RO'YXAT O'ZGARGAN BO'LSA RAD ETILADI: operator tasdiqlash
+    // oynasida ko'rgan raqam bilan amal paytidagi raqam boshqa
+    // bo'lsa, u o'zi ko'rmagan guruhda xabar o'chirishni yoqib
+    // yuborardi — qaytarib bo'lmaydigan amal.
+    if (dto.expectedCount !== undefined && dto.expectedCount !== candidates.length) {
+      throw new BadRequestException(
+        `Ro'yxat o'zgardi: tasdiqlashda ${dto.expectedCount} ta edi, hozir ${candidates.length} ta. Sahifani yangilab, qaytadan urinib ko'ring.`,
+      );
+    }
+
+    // ⚠️ HOLATI ALLAQACHON TO'G'RI BO'LGANLAR TEGILMAYDI:
+    // `guardAt`/`guardBy` qayta yozilsa, qalqon QACHON va KIM
+    // tomonidan yoqilgani yo'qolardi — bu xavfsizlik dalili.
+    const pending = candidates.filter((g) => g.guardEnabled !== dto.guardEnabled);
+    const chatIds = pending.map((g) => g.chatId);
+
+    if (chatIds.length === 0) {
+      return {
+        changed: 0,
+        unchanged: candidates.length,
+        matched: candidates.length,
+      };
+    }
+
+    const { count } = await this.prisma.telegramGroup.updateMany({
+      where: { chatId: { in: chatIds } },
+      data: {
+        guardEnabled: dto.guardEnabled,
+        guardAt: dto.guardEnabled ? new Date() : null,
+        guardBy: dto.guardEnabled ? actorId : null,
+      },
+    });
+
+    await this.audit.record({
+      userId: actorId,
+      action: dto.guardEnabled ? "group.guard_on_bulk" : "group.guard_off_bulk",
+      entity: "telegram_group",
+      // ⚠️ `entityId` YO'Q: amal bitta guruhga tegishli emas.
+      entityId: null,
+      meta: {
+        count,
+        chatIds,
+        filter: {
+          isOfficial: dto.filterIsOfficial,
+          mahallaId: dto.filterMahallaId,
+          unassigned: dto.filterUnassigned,
+          search: dto.filterSearch,
+        },
+      },
+      ip,
+    });
+
+    this.logger.log(
+      `[Security] ommaviy qalqon ${dto.guardEnabled ? "yoqildi" : "o'chirildi"}: ${count} guruh`,
+    );
+
+    return {
+      changed: count,
+      unchanged: candidates.length - count,
+      matched: candidates.length,
+    };
   }
 }

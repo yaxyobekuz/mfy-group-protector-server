@@ -76,6 +76,35 @@ export class SetOfficialDto {
 }
 
 /**
+ * OMMAVIY KUZATUV — ekrandagi FILTR bo'yicha.
+ *
+ * ⚠️ `chatId` RO'YXATI EMAS, FILTR YUBORILADI. Sabab: panelda
+ * operator "ekranda ko'rinayotgan hammasi" deb o'ylaydi, lekin
+ * ro'yxat sahifalangan — mijoz faqat 50 tasini biladi. Id ro'yxati
+ * yuborilsa, "hammasiga yoqdim" degan odam aslida birinchi
+ * sahifani yoqqan bo'lardi va buni HECH NARSA ko'rsatmasdi.
+ *
+ * ⚠️ FILTR SERVERDA QAYTA HAL QILINADI va ustiga qamrov sharti
+ * QO'SHILADI (`mahallaScopeWhere`) — ya'ni tuman xodimi filtrni
+ * qo'lda yasab ham begona guruhga tega olmaydi.
+ *
+ * ⚠️ `expectedCount` — TASDIQ. Panel tasdiqlash oynasida raqam
+ * ko'rsatadi; o'sha paytdan amalga qadar ro'yxat o'zgargan bo'lsa
+ * (yangi guruh qo'shildi), server RAD ETADI. Aks holda odam "12 ta"
+ * deb tasdiqlab, 40 tasini yoqib yuborardi.
+ */
+export class BulkOfficialDto {
+  @IsBoolean() isOfficial!: boolean;
+
+  @IsOptional() @toBool() @IsBoolean() filterIsOfficial?: boolean;
+  @IsOptional() @IsString() filterMahallaId?: string;
+  @IsOptional() @toBool() @IsBoolean() filterUnassigned?: boolean;
+  @IsOptional() @IsString() @MaxLength(120) filterSearch?: string;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) expectedCount?: number;
+}
+
+/**
  * ⚠️ `mahallaId: null` — BIRIKTIRISHNI YECHISH. `@IsOptional()`
  * `null` ni ham o'tkazadi va service'da u ataylab farqlanadi:
  * berilmagan (`undefined`) va bo'shatilgan (`null`) bir xil emas.
