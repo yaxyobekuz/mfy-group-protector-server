@@ -14,6 +14,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "db:seed": "ts-node prisma/seed.ts",
+    "db:import:territory": "ts-node prisma/import-territory.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {
