@@ -34,18 +34,12 @@ export class BlockCitizenDto {
   @IsOptional() @IsString() @Length(3, 300) reason?: string;
 }
 
-export class BroadcastDto {
-  @IsString() @Length(3, 4000) message!: string;
-
-  /**
-   * null/bo'sh — BARCHA fuqarolarga. Berilsa — faqat shu tuman
-   * fuqarolariga.
-   *
-   * ⚠️ KENG QAMROVLI AMAL: xabar fuqarolarning SHAXSIY chatiga boradi.
-   * Shuning uchun `citizens.manage` talab qilinadi va audit yoziladi.
-   */
-  @IsOptional() @IsString() districtId?: string;
-}
+/**
+ * ⚠️ `BroadcastDto` OLIB TASHLANDI — o'rnida
+ * `modules/broadcasts/dto/broadcasts.dto.ts`. Tarqatma endi fuqarolar
+ * bo'limining ishi emas: u guruhlarga ham boradi va botdan uzatilgan
+ * xabarni ham yuboradi.
+ */
 
 /**
  * REYTING SO'ROVI (panel).

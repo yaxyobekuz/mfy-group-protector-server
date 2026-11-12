@@ -29,6 +29,14 @@ import {
 
 export interface GroupListFilter {
   isOfficial?: boolean;
+  /**
+   * ⚠️ TUMAN FILTRI MFY FILTRIDAN ALOHIDA va u KERAK: viloyatda
+   * BIR XIL NOMLI MFY lar bor (har tumanda "Turon", "Birlik") va
+   * ro'yxatda faqat MFY nomi ko'rsatilsa, operator qaysi biri
+   * ekanini bilmasdi. Tumanni tanlab, MFY ro'yxatini toraytirish —
+   * eng oddiy yechim.
+   */
+  districtId?: string;
   mahallaId?: string;
   unassigned?: boolean;
   search?: string;
@@ -47,6 +55,12 @@ export const groupListWhere = (
 ) => ({
   ...mahallaScopeWhere(scope, { includeUnassigned: isProvinceWide(scope) }),
   ...(filter.isOfficial !== undefined ? { isOfficial: filter.isOfficial } : {}),
+  // ⚠️ ANIQ MFY TANLANGAN BO'LSA TUMAN FILTRI ORTIQCHA: MFY
+  // allaqachon bitta tumanga tegishli. Ikkalasi birga qo'yilsa va
+  // mos kelmasa, natija jim bo'sh chiqardi.
+  ...(filter.districtId && !filter.mahallaId
+    ? { mahalla: { districtId: filter.districtId } }
+    : {}),
   ...(filter.mahallaId ? { mahallaId: filter.mahallaId } : {}),
   ...(filter.unassigned ? { mahallaId: null } : {}),
   ...(filter.search

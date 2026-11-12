@@ -12,7 +12,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { IssueStatus, type Prisma } from "@prisma/client";
 
-import { env } from "../../config/env.config";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../../common/audit.service";
 import { activeCitizenWhere } from "../../common/citizen-deleted";
@@ -20,12 +19,10 @@ import { paginate } from "../../common/dto/pagination.dto";
 import { districtScopeWhere, type ScopeContext } from "../../common/scope.util";
 import type {
   BlockCitizenDto,
-  BroadcastDto,
   ListCitizensQuery,
   RatingQuery,
 } from "./dto/citizens.dto";
 
-const TELEGRAM_API = "https://api.telegram.org";
 
 @Injectable()
 export class CitizensService {
@@ -250,87 +247,14 @@ export class CitizensService {
   }
 
   /**
-   * FUQAROLARGA XABAR YUBORISH — ularning SHAXSIY chatiga.
+   * ⚠️ TARQATMA BU YERDAN OLIB TASHLANDI — `modules/broadcasts/`.
    *
-   * ⚠️ YANGILIK E'LONIDAN FARQI: e'lon ilovada ko'rinadi (fuqaro o'zi
-   * ochadi); bu esa Telegram'da PUSH sifatida darhol yetib boradi.
-   * Shuning uchun u kuchliroq amal — `citizens.manage` va audit.
-   *
-   * ⚠️ BLOKLANGANLARGA YUBORILMAYDI. Ketma-ket yuboriladi (Telegram
-   * 429 bermasligi uchun) — `issue-notify.service.ts` bilan ayni sabab.
-   *
-   * ⚠️ XATO BITTA FUQARODA TO'XTATMAYDI: kimdir botni bloklagan
-   * bo'lsa (Telegram 403), qolganlarga yuborilaveradi.
+   * Sabab: u faqat fuqarolarga va faqat matn yubora olardi. Tuman/MFY
+   * kesimi, MFY guruhlari va botdan uzatilgan xabar qo'shilgach, u
+   * "fuqarolar bo'limi"ning ishi bo'lmay qoldi — va Telegram'ga
+   * yuborish kodining UCHINCHI nusxasi paydo bo'lardi
+   * (`common/telegram.ts` endi yagona manba).
    */
-  async broadcast(dto: BroadcastDto, userId: string) {
-    if (!env.botToken) {
-      throw new BadRequestException(
-        "BOT_TOKEN sozlanmagan — xabar yuborib bo'lmaydi",
-      );
-    }
-
-    const recipients = await this.prisma.citizen.findMany({
-      where: {
-        isBlocked: false,
-        // ⚠️ O'CHIRILGAN HISOBGA YOZILMAYDI. Amalda `telegramId`
-        // filtri uni allaqachon chiqarib tashlaydi (o'chirishda u
-        // `null` bo'ladi), lekin shartni ATAYLAB yozamiz: himoya
-        // tasodifga qoldirilmaydi — `telegramId` ni tozalash qoidasi
-        // keyin o'zgarsa, tarqatma jimgina o'chirilgan hisoblarga
-        // ketib qolardi.
-        ...activeCitizenWhere,
-        // ⚠️ TELEGRAM HISOBI BORLAR: mobil ilovadan (Google bilan)
-        // kirgan fuqaroda `telegramId` YO'Q va unga Telegram orqali
-        // xabar yuborib bo'lmaydi. Filtrsiz ular "failed" bo'lib
-        // sanalardi va panelda "yuborilmadi: 400" degan qo'rqinchli
-        // son chiqardi — aslida esa hech narsa buzilmagan.
-        telegramId: { not: null },
-        ...(dto.districtId ? { districtId: dto.districtId } : {}),
-      },
-      select: { telegramId: true },
-    });
-
-    const text = this.escapeHtml(dto.message.trim());
-    let sent = 0;
-    let failed = 0;
-
-    for (const citizen of recipients) {
-      if (!citizen.telegramId) continue;
-      const ok = await this.sendTelegram(citizen.telegramId, text);
-      if (ok) sent += 1;
-      else failed += 1;
-    }
-
-    await this.audit.record({
-      userId,
-      action: "citizen.broadcast",
-      entity: "Citizen",
-      meta: { districtId: dto.districtId ?? null, recipients: recipients.length, sent, failed },
-    });
-
-    return { recipients: recipients.length, sent, failed };
-  }
-
-  // ───────────────────────────────────────────────────────────────
-
-  private async sendTelegram(chatId: string, html: string): Promise<boolean> {
-    try {
-      const response = await fetch(`${TELEGRAM_API}/bot${env.botToken}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: html,
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: true },
-        }),
-      });
-      return response.ok;
-    } catch (error) {
-      this.logger.warn(`Xabar yuborilmadi (${chatId}): ${(error as Error).message}`);
-      return false;
-    }
-  }
 
   /** `parse_mode: HTML` uchun — `issue-notify.service.ts` bilan ayni. */
   private escapeHtml(value: string): string {

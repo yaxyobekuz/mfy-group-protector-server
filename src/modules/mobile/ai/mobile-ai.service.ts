@@ -28,13 +28,38 @@ export interface AnalyzableCategory {
   id: string;
   name: string;
   description: string | null;
+  /**
+   * ⚠️ ASOSIY YO'NALISH NOMI — KICHIK YO'NALISH UCHUN. Model
+   * ro'yxatni "ASOSIY → Kichik" ko'rinishida ko'radi: yakka
+   * "Ichimlik suvi" degan yozuv kontekstsiz qoladi va model uni
+   * "Tozalik va ekologiya" bilan adashtirishi mumkin edi.
+   */
+  parentName?: string | null;
 }
+
+/**
+ * SHOSHILINCHLIK DARAJASI — MATNDAN.
+ *
+ * ⚠️ DARAJA, SOAT EMAS: izoh `mobile-ai.constants.ts#URGENCY_HOURS`
+ * da. Qisqasi — modeldan raqam so'ralsa, u o'ylab topilgan raqam
+ * qaytaradi va o'sha raqam murojaatning MUDDATI bo'lib qolardi.
+ */
+export type SuggestedUrgency = "routine" | "soon" | "urgent" | "emergency";
+
+const VALID_URGENCY: ReadonlySet<SuggestedUrgency> = new Set<SuggestedUrgency>([
+  "routine",
+  "soon",
+  "urgent",
+  "emergency",
+]);
 
 export type SuggestedPriority = "low" | "normal" | "high" | "urgent";
 
 export interface CategorySuggestion {
   categoryId: string;
   confidence: number;
+  /** Matndan chiqqan shoshilinchlik darajasi — muddat TAVSIYASI uchun. */
+  urgency: SuggestedUrgency;
   priority: SuggestedPriority;
 }
 
@@ -127,7 +152,12 @@ export class MobileAiService {
     const content = choice?.message?.content;
     if (!content) return null;
 
-    let parsed: { categoryId?: unknown; confidence?: unknown; priority?: unknown };
+    let parsed: {
+      categoryId?: unknown;
+      confidence?: unknown;
+      priority?: unknown;
+      urgency?: unknown;
+    };
     try {
       parsed = JSON.parse(content) as typeof parsed;
     } catch {
@@ -147,18 +177,38 @@ export class MobileAiService {
         ? (parsed.priority as SuggestedPriority)
         : "normal";
 
-    return { categoryId, confidence, priority };
+    /**
+     * ⚠️ TANILMAGAN DARAJA — `soon`, `null` EMAS: sxema `enum`
+     * bilan himoyalangan, lekin shlyuz sxemani chetlab o'tgan
+     * holatlar TIRIK KUZATILGAN (CLAUDE.md). O'rtacha daraja
+     * tanlanadi — u na muddatni keskin qisqartiradi, na uzaytiradi.
+     */
+    const urgency = VALID_URGENCY.has(parsed.urgency as SuggestedUrgency)
+      ? (parsed.urgency as SuggestedUrgency)
+      : "soon";
+
+    return { categoryId, confidence, priority, urgency };
   }
 
   // ───────────────────────────────────────────────────────────────
 
   private buildUserText(body: string, categories: AnalyzableCategory[]): string {
     const list = categories
-      .map((category) =>
-        category.description
-          ? `- ${category.id} — ${category.name} (${category.description})`
-          : `- ${category.id} — ${category.name}`,
-      )
+      .map((category) => {
+        /**
+         * ⚠️ "ASOSIY → Kichik" KO'RINISHI: yakka "Ichimlik suvi"
+         * kontekstsiz qoladi va model uni "Tozalik va ekologiya"
+         * bilan adashtirishi mumkin edi. Ro'yxat ikki darajali
+         * bo'lgach, bu farq hal qiluvchi ahamiyat kasb etdi.
+         */
+        const label = category.parentName
+          ? `${category.parentName} → ${category.name}`
+          : category.name;
+
+        return category.description
+          ? `- ${category.id} — ${label} (${category.description})`
+          : `- ${category.id} — ${label}`;
+      })
       .join("\n");
 
     return [

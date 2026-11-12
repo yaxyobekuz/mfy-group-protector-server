@@ -2,6 +2,8 @@ import { Module } from "@nestjs/common";
 
 import { AuditService } from "../../common/audit.service";
 import { CategoriesController, IssuesController } from "./issues.controller";
+import { AppealTriageService } from "./appeal-triage.service";
+import { AssignmentRulesService } from "./assignment-rules.service";
 import { CategoriesService } from "./categories.service";
 import { IssueNotifyService } from "./issue-notify.service";
 import { IssuesService } from "./issues.service";
@@ -17,11 +19,28 @@ import { IssuesService } from "./issues.service";
   // bilan yozilgan ESKI murojaatlar bazada turibdi va hisobotda
   // o'z yo'lini saqlashi kerak (`source` — muhrlangan qiymat).
   controllers: [IssuesController, CategoriesController],
-  providers: [IssuesService, CategoriesService, IssueNotifyService, AuditService],
+  providers: [
+    IssuesService,
+    CategoriesService,
+    IssueNotifyService,
+    AssignmentRulesService,
+    AppealTriageService,
+    AuditService,
+  ],
   // ⚠️ `IssuesService` EKSPORT QILINADI: `signals` moduli signalni
   // muammoga aylantirishda shuni chaqiradi. Yaratish mantig'i
   // (`publicNo`, kategoriya tekshiruvi, `source` muhri) IKKI JOYDA
   // takrorlanmasligi kerak.
-  exports: [IssuesService, CategoriesService, IssueNotifyService],
+  // ⚠️ `AssignmentRulesService` EKSPORT QILINADI: murojaat uchta
+  // yo'l bilan yaratiladi (panel, signal, ilova/bot) va ijrochi
+  // qoidasi UCHALASIDA ham ishlashi kerak — `mobile` moduli shuni
+  // chaqiradi.
+  exports: [
+    IssuesService,
+    CategoriesService,
+    IssueNotifyService,
+    AssignmentRulesService,
+    AppealTriageService,
+  ],
 })
 export class IssuesModule {}

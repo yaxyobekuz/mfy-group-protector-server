@@ -67,9 +67,40 @@ export class BotCitizensService {
         lastName,
         username,
         languageCode: identity.languageCode?.trim().slice(0, 8) || "uz",
+        lastSeenAt: new Date(),
       },
-      select: { id: true, isBlocked: true, blockReason: true },
+      select: {
+        id: true,
+        isBlocked: true,
+        blockReason: true,
+        lastSeenAt: true,
+      },
     });
+
+    /**
+     * ── OXIRGI FAOLLIK ───────────────────────────────────────
+     *
+     * ⚠️ PANELDAGI "OBUNACHILAR" SONI SHUNGA TAYANADI: ro'yxatdan
+     * o'tganlar soni yildan-yilga o'sib boradi va "bizda 40 ming
+     * foydalanuvchi bor" degan ma'nosiz raqamga aylanadi. Haqiqiy
+     * savol — "nechtasi hali ham ishlatadi".
+     *
+     * ⚠️ KUNIGA BIR MARTA YOZILADI, har so'rovda EMAS: fuqaro
+     * murojaat yozayotganda o'nlab so'rov yuboradi (matn, yo'nalish,
+     * surat, joy, tasdiq) va har biri uchun `UPDATE` yozish bazaga
+     * keraksiz yuk berardi. Sanoq 30 kunlik oyna bo'yicha, ya'ni bir
+     * kunlik aniqlik yetarli.
+     */
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const seenAt = citizen.lastSeenAt?.getTime() ?? 0;
+
+    if (Date.now() - seenAt > DAY_MS) {
+      // ⚠️ XATO YUTILADI: faollik belgisi — STATISTIKA va u
+      // yozilmagani uchun murojaat oqimi to'xtamasligi kerak.
+      await this.prisma.citizen
+        .update({ where: { id: citizen.id }, data: { lastSeenAt: new Date() } })
+        .catch(() => undefined);
+    }
 
     // ⚠️ BLOK KIRISH BOSQICHIDA TO'XTATADI va SABAB qaytariladi: u
     // botda fuqaroga ko'rsatiladi. Sababsiz blok "bot ishlamayapti"

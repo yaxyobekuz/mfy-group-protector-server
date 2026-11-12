@@ -32,6 +32,17 @@ export class MembershipDto {
   @IsString() @MaxLength(32) status!: string;
   @IsOptional() @IsBoolean() canPostMessages?: boolean;
   @IsOptional() @IsBoolean() canInviteUsers?: boolean;
+
+  /**
+   * ⚠️ QALQON AYNAN SHUNGA BOG'LIQ: huquq yo'q bo'lsa bot zararli
+   * xabarni o'chira olmaydi va panel buni KO'RSATISHI kerak — aks
+   * holda "himoya yoqilgan" deb o'ylab yurilardi.
+   */
+  @IsOptional() @IsBoolean() canDeleteMessages?: boolean;
+
+  /** A'zolar soni — panelda "obunachilar" sanog'i uchun. */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) memberCount?: number;
+
   @IsOptional() @IsString() @MaxLength(64) addedByTgId?: string;
 }
 
@@ -40,6 +51,13 @@ export class TouchGroupDto {
   @IsString() @MaxLength(32) type!: string;
   @IsOptional() @IsString() @MaxLength(256) title?: string;
   @IsOptional() @IsString() @MaxLength(64) username?: string;
+
+  /**
+   * ⚠️ HAR XABARDA KELMAYDI: bot a'zolar sonini bir necha soatda
+   * bir marta o'qiydi (`getChatMemberCount` — alohida Telegram
+   * so'rovi). `undefined` — "o'zgarmadi", `0` dan BOSHQA narsa.
+   */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) memberCount?: number;
 }
 
 export class CaptureMessageDto {
@@ -66,6 +84,8 @@ export class CaptureMessageDto {
 
 export class ListGroupsQuery extends PaginationQuery {
   @IsOptional() @toBool() @IsBoolean() isOfficial?: boolean;
+  /** ⚠️ Bir xil nomli MFY lar uchun — `group-filter.util.ts` izohi. */
+  @IsOptional() @IsString() districtId?: string;
   @IsOptional() @IsString() mahallaId?: string;
   @IsOptional() @toBool() @IsBoolean() unassigned?: boolean;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
@@ -97,6 +117,13 @@ export class BulkOfficialDto {
   @IsBoolean() isOfficial!: boolean;
 
   @IsOptional() @toBool() @IsBoolean() filterIsOfficial?: boolean;
+  /**
+   * ⚠️ TUMAN FILTRI HAM UZATILADI: ommaviy amalning qamrovi —
+   * EKRANDAGI filtr natijasi. Bu maydon tushib qolsa, operator
+   * bitta tumanni ko'rib turib, amalni BUTUN VILOYATGA
+   * bajarardi (`group-filter.util.ts` boshidagi izoh).
+   */
+  @IsOptional() @IsString() filterDistrictId?: string;
   @IsOptional() @IsString() filterMahallaId?: string;
   @IsOptional() @toBool() @IsBoolean() filterUnassigned?: boolean;
   @IsOptional() @IsString() @MaxLength(120) filterSearch?: string;

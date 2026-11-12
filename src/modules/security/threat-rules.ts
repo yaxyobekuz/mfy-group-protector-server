@@ -148,6 +148,46 @@ export const hostMatches = (host: string, list: readonly string[]): boolean => {
 };
 
 /** Matndan havolalarni ajratadi. */
+/**
+ * HOST TASHQI RO'YXATDAMI — TO'PLAM BO'YICHA.
+ *
+ * ⚠️ `hostMatches` DAN FARQI TEZLIKDA. U butun ro'yxatni aylanib
+ * chiqadi va qo'lda kiritilgan 20-30 domen uchun bu yetarli. Tashqi
+ * ro'yxatda esa 50 000 host bor va har havola uchun 50 000 ta
+ * solishtirish botni sezilarli sekinlashtirardi — o'chirish esa
+ * VAQTGA bog'liq amal.
+ *
+ * ⚠️ SHUNING UCHUN TESKARI TOMONDAN QIDIRILADI: hostning o'zi, keyin
+ * ota-domenlari (a.b.evil.com → b.evil.com → evil.com). Bu 3-4 ta
+ * qidiruv, ro'yxat hajmidan QAT'IY NAZAR.
+ *
+ * ⚠️ RO'YXAT NORMALLASHTIRILGAN HOLDA KELADI (server `normalizeHost`
+ * ni yozishda qo'llagan): bu yerda qayta normallashtirish 50 000
+ * satrni har safar qayta ishlash degani bo'lardi.
+ */
+export const hostInSet = (
+  host: string,
+  set: ReadonlySet<string> | undefined,
+): boolean => {
+  if (!set || set.size === 0) return false;
+
+  let probe = normalizeHost(host);
+
+  while (probe) {
+    if (set.has(probe)) return true;
+
+    const dot = probe.indexOf(".");
+    if (dot < 0) break;
+    probe = probe.slice(dot + 1);
+
+    // ⚠️ TLD GA YETGANDA TO'XTAYDI: "com" ni ro'yxatda qidirish
+    // ma'nosiz va noto'g'ri mos kelish xavfini tug'dirardi.
+    if (!probe.includes(".")) break;
+  }
+
+  return false;
+};
+
 export const extractUrls = (text: string): string[] => {
   const found = text.match(URL_REGEX);
   if (!found) return [];
@@ -172,6 +212,23 @@ export interface GuardConfig {
   deleteUrls: boolean;
   blockedHosts: readonly string[];
   allowedHosts: readonly string[];
+
+  /**
+   * TASHQI RO'YXATLARDAN YIG'ILGAN HOSTLAR (URLhaus, PhishTank,
+   * AdGuard va h.k.).
+   *
+   * ⚠️ MASSIV EMAS, TO'PLAM: unda 50 000 host bo'lishi mumkin va har
+   * havola uchun massivni aylanib chiqish botni sezilarli
+   * sekinlashtirardi (`hostInSet` izohi).
+   *
+   * ⚠️ IXTIYORIY: ro'yxat hali yuklanmagan bo'lishi mumkin (bot endi
+   * ko'tarildi, server javob bermadi) va o'shanda qalqon QO'LDAGI
+   * ro'yxat bilan ishlashda davom etadi.
+   *
+   * ⚠️ OQ RO'YXAT BARIBIR USTUN: `gov.uz` tashqi ro'yxatga xato bilan
+   * tushsa ham o'chirilmaydi (`inspectUrl` dagi tartib).
+   */
+  feedHosts?: ReadonlySet<string>;
 }
 
 export interface FileInput {
@@ -254,6 +311,19 @@ export const inspectUrl = (
 
   if (hostMatches(host, config.blockedHosts)) {
     return { kind: "suspicious_url", reason: "blocked_host", url, urlHost: host };
+  }
+
+  /**
+   * ⚠️ TASHQI RO'YXAT QO'LDAGISIDAN KEYIN TEKSHIRILADI: qo'lda
+   * kiritilgan domen — ma'muriyatning ANIQ qarori va u sabab
+   * kalitida ham shunday ko'rinishi kerak.
+   *
+   * ⚠️ SABAB ALOHIDA (`feed_host`): panelda "qayerdan bilindi" degan
+   * savolga javob shundan. Ikkalasi bitta kalit bilan yozilsa,
+   * ma'muriyat tashqi ro'yxatning foydasini umuman ko'rmasdi.
+   */
+  if (hostInSet(host, config.feedHosts)) {
+    return { kind: "suspicious_url", reason: "feed_host", url, urlHost: host };
   }
 
   if (URL_SHORTENERS.has(host)) {
@@ -525,15 +595,50 @@ const IMPERSONATED_DOMAINS: readonly string[] = [
   "click.uz", "payme.uz", "paynet.uz", "uzum.uz",
 ];
 
+/**
+ * RASMIY SAHIFALAR TURADIGAN XIZMATLAR — ALDOV DALILI EMAS.
+ *
+ * ⚠️ BU RO'YXAT HAQIQIY NOTO'G'RI O'CHIRISHDAN KEYIN QO'SHILDI. IIV
+ * ning firibgarlikka qarshi ogohlantirishi oxirida "Website |
+ * Telegram | Facebook | Instagram | Youtube | Ok | TV" degan qator
+ * bor va ularning HAR BIRI gipermurojaat: biri `gov.uz` ga, biri
+ * `t.me/iivuz` ga. Eski qoida buni "ko'rinishda gov.uz, amalda
+ * t.me" deb o'qib, RASMIY xabarni o'chirishga urindi.
+ *
+ * ⚠️ FAQAT "YASHIRILGAN MANZIL" QOIDASIDAN CHIQARILADI: qora
+ * ro'yxat, qisqartirgich va "ikki dalil" tekshiruvlari bu hostlarga
+ * BARIBIR ishlaydi — `t.me` dagi firibgar kanal himoyasiz
+ * qolmaydi.
+ */
+const SOCIAL_HOSTS: readonly string[] = [
+  "t.me", "telegram.me", "telegram.org", "telegram.dog",
+  "facebook.com", "fb.com", "fb.me", "instagram.com",
+  "youtube.com", "youtu.be", "ok.ru", "odnoklassniki.ru",
+  "vk.com", "x.com", "twitter.com", "linkedin.com", "tiktok.com",
+];
+
 export interface DomainMismatch {
   shown: string;
   actual: string;
   url: string;
 }
 
+/**
+ * ⚠️ IKKINCHI ARGUMENT — YASHIRIN MANZILLAR (`text_link` ichidagi
+ * `url`), matndan ajratib olingan havolalar EMAS. Bu farq butun
+ * qoidaning MA'NOSI: aldov — "yozilgani boshqa, ochiladigani
+ * boshqa", ya'ni IKKI TOMON kerak. Matndagi `gov.uz/vplt` — odam
+ * O'QIYDIGAN tomon; `entity.url` esa OCHILADIGAN tomon.
+ *
+ * ⚠️ AVVAL IKKALASI BIR QOPGA SOLINGAN EDI (`handler.ts` yashirin
+ * manzillarni matnga QO'SHIB uzatardi) va aynan shuning uchun oddiy
+ * KO'P HAVOLALI xabar — `gov.uz` ga ham, `t.me` ga ham havola
+ * qilgan rasmiy e'lon — "yashirilgan manzil" deb topilgan. Ya'ni
+ * qoida aldovni emas, HAVOLALAR SONINI o'qiyotgan edi.
+ */
 export const findDomainMismatch = (
   text: string,
-  urls: readonly string[],
+  hiddenUrls: readonly string[],
 ): DomainMismatch | null => {
   const haystack = normalizeText(text);
 
@@ -541,7 +646,19 @@ export const findDomainMismatch = (
     // Matnda rasmiy domen NOMI tilga olinganmi
     if (!haystack.includes(shown)) continue;
 
-    for (const url of urls) {
+    /**
+     * ⚠️ HALOL HAVOLA DALILNI BEKOR QILADI: xabarda o'sha rasmiy
+     * domenga HAQIQIY havola ham bo'lsa, domen nomi aldov uchun
+     * emas, o'z o'rnida ishlatilgan. Firibgar bunday havolani
+     * QO'YMAYDI — uning maqsadi odamni rasmiy saytdan UZOQLASHTIRISH.
+     */
+    const honest = hiddenUrls.some((url) => {
+      const host = hostOf(url);
+      return host !== null && (host === shown || host.endsWith(`.${shown}`));
+    });
+    if (honest) continue;
+
+    for (const url of hiddenUrls) {
       const host = hostOf(url);
       if (!host) continue;
 
@@ -551,11 +668,45 @@ export const findDomainMismatch = (
       // Boshqa rasmiy domenga ketsa ham muammo yo'q
       if (hostMatches(host, IMPERSONATED_DOMAINS)) continue;
 
+      // Rasmiy sahifa turadigan xizmat — yuqoridagi izoh.
+      if (hostMatches(host, SOCIAL_HOSTS)) continue;
+
       return { shown, actual: host, url };
     }
   }
 
   return null;
+};
+
+/**
+ * FIRIBGARLIKKA QARSHI OGOHLANTIRISH — O'CHIRILMAYDI.
+ *
+ * ⚠️ RASMIY IDORA ALDOV IBORASINI AYNAN KO'CHIRIB YOZADI: IIV ning
+ * ogohlantirishida «Pulingizni ko'paytirib beraman» degan ibora
+ * QO'SHTIRNOQDA keltiriladi, undan keyin "aldanmang" deyiladi.
+ * Ibora ro'yxati esa qo'shtirnoqni ko'rmaydi — ya'ni ogohlantirish
+ * aldovning O'ZI deb o'chirilib ketardi.
+ *
+ * ⚠️ FAQAT `scam_text` QOIDASIGA TEGISHLI. Apk, qora ro'yxat,
+ * qisqartirgich va yashirilgan manzil baribir ishlaydi — ya'ni bu
+ * "sehrli so'z yozib qutulish" yo'li emas: firibgarning HAVOLASI
+ * qoidaga tushsa, matnda nima yozilgani ahamiyatsiz.
+ */
+const WARNING_MARKERS: readonly string[] = [
+  "aldanmang", "aldanib qolmang", "ishonmang", "ishonib qolmang",
+  "firibgar", "firibgarlik", "firibgarlarga", "aldov", "aldamchi",
+  "ogoh bo'ling", "hushyor bo'ling", "ehtiyot bo'ling",
+  "ogohlantiramiz", "ogohlantirish", "aldanmaslik uchun",
+  "алданманг", "ишонманг", "фирибгар", "фирибгарлик",
+  "огоҳ бўлинг", "ҳушёр бўлинг", "эҳтиёт бўлинг", "огоҳлантирамиз",
+];
+
+const NORMALIZED_WARNINGS: readonly string[] = WARNING_MARKERS.map(normalizeText);
+
+/** Matn firibgarlikdan OGOHLANTIRYAPTIMI (ya'ni aldovning o'zi emas). */
+export const isFraudWarning = (text: string): boolean => {
+  const haystack = normalizeText(text);
+  return NORMALIZED_WARNINGS.some((needle) => haystack.includes(needle));
 };
 
 /**
@@ -568,13 +719,40 @@ export const findDomainMismatch = (
  * ⚠️ BIRINCHI TOPILGAN YETARLI: xabar baribir BUTUNLAY o'chiriladi,
  * ya'ni qolgan havolalarni sanash yozuvni shishirardi.
  */
+/**
+ * XABARDAGI HAVOLALAR — IKKI ALOHIDA RO'YXAT.
+ *
+ * ⚠️ FARQ QOIDA UCHUN HAL QILUVCHI: matnda KO'RINADIGAN havolada
+ * "yozilgani = ochiladigani" (Telegram uni o'zi havolaga
+ * aylantiradi), `text_link` ichidagisi esa KO'RINMAYDI. "Yashirilgan
+ * manzil" qoidasi aynan shu farqqa tayanadi, shuning uchun ikkisi
+ * BIR QOPGA solinmaydi.
+ */
+export interface MessageLinks {
+  /** `text_link` entity'laridagi manzillar — matnda KO'RINMAYDI. */
+  hidden?: readonly string[];
+  /** `url` entity'lari — matnda ko'rinadi, lekin regex o'tkazib yuborishi mumkin. */
+  visible?: readonly string[];
+}
+
 export const inspectText = (
   text: string,
   config: GuardConfig,
+  links: MessageLinks = {},
 ): ThreatVerdict | null => {
   if (!config.deleteUrls || !text) return null;
 
-  const urls = extractUrls(text);
+  const hidden = links.hidden ?? [];
+
+  /**
+   * ⚠️ HAMMA HAVOLA BIR RO'YXATDA — "havolaning o'zi qoidaga
+   * tushadimi" va "ikki dalil" tekshiruvlari uchun. Yashirin manzil
+   * ham HAVOLA: usiz "ibora bor, lekin havola yo'q" deb firibgarning
+   * asosiy quroli o'tib ketardi.
+   */
+  const urls = [
+    ...new Set([...extractUrls(text), ...(links.visible ?? []), ...hidden]),
+  ];
 
   for (const url of urls) {
     const verdict = inspectUrl(url, config);
@@ -587,7 +765,7 @@ export const inspectText = (
    * ⚠️ YAKKA O'ZI YETARLI: rasmiy domen nomini yozib, boshqa saytga
    * olib borish — ataylab qilingan aldov, tasodif emas.
    */
-  const mismatch = findDomainMismatch(text, urls);
+  const mismatch = findDomainMismatch(text, hidden);
   if (mismatch) {
     return {
       kind: "masked_url",
@@ -615,6 +793,13 @@ export const inspectText = (
   });
 
   if (!untrusted) return null;
+
+  /**
+   * ⚠️ OGOHLANTIRISHGA TEGILMAYDI — `isFraudWarning` izohi. Bu
+   * tekshiruv FAQAT shu yerda, ya'ni yuqoridagi aniq dalillardan
+   * (qora ro'yxat, qisqartirgich, yashirilgan manzil) KEYIN turadi.
+   */
+  if (isFraudWarning(text)) return null;
 
   const phrase = findScamPhrase(text);
   const money = findLargeMoney(text);

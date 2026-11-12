@@ -88,6 +88,20 @@ datasource db {
 model District {
   id String @id @default(cuid())
 
+  /// ── AHOLI SONI ─────────────────────────────────────────
+  ///
+  /// ⚠️ NISBIY KO'RSATKICH UCHUN: "Ulug'norda 50 ta, Asakada 450 ta
+  /// murojaat" degan raqam HECH NARSA aytmaydi — Asaka shunchaki
+  /// kattaroq. "Har 1000 kishiga 20 ta va 18 ta" esa ikkisini
+  /// SOLISHTIRIB bo'ladigan qiladi.
+  ///
+  /// ⚠️ MFY LAR YIG'INDISIDAN ALOHIDA: MFY aholisi to'liq
+  /// to'ldirilmagan bo'lishi mumkin va o'shanda yig'indi tumanni
+  /// sun'iy ravishda "kichik" ko'rsatib, nisbiy sonni osmonga
+  /// ko'tarardi. Bo'sh bo'lsa — yig'indi ZAXIRA sifatida ishlatiladi
+  /// (`reports.service.ts`).
+  population Int?
+
   /// Qisqa kod — URL va import uchun ("chilonzor").
   code String @unique
   name String
@@ -107,6 +121,7 @@ model District {
   users         User[]
   citizens      Citizen[]
   announcements Announcement[]
+  broadcasts    Broadcast[]
 
   @@index([isArchived, sortOrder])
   @@map("districts")
@@ -136,6 +151,25 @@ model Mahalla {
   /// kiritishni butunlay to'xtatib qo'yardi.
   population Int?
 
+  /// ── GEOMETRIYA — XARITA UCHUN ────────────────────────
+  ///
+  /// ⚠️ IKKALASI HAM IXTIYORIY va bu ataylab: MFY chegaralari
+  /// RASMIY MANBADAN keladi (kadastr, OSM eksporti) va ular hamma
+  /// MFY uchun birdan topilmaydi. Maydon majburiy qilinsa, chegarasi
+  /// yo'q MFY ni umuman yaratib bo'lmasdi.
+  ///
+  /// ⚠️ `geoJson` — GeoJSON `Polygon`/`MultiPolygon` GEOMETRIYASI
+  /// (`Feature` emas): xarita uni to'g'ridan-to'g'ri chizadi va
+  /// o'rash qatlami qo'shilsa, import qilgan odam qaysi shaklni
+  /// berishni bilmasdi.
+  ///
+  /// ⚠️ `lat`/`lng` — YORLIQ MARKAZI. Chegara bo'lmasa ham u
+  /// bo'lishi mumkin — o'shanda xarita poligon o'rniga DOIRA
+  /// chizadi va "qayerda nima ko'p" savoli javobsiz qolmaydi.
+  geoJson Json?  @map("geo_json")
+  lat     Float?
+  lng     Float?
+
   sortOrder Int @default(0) @map("sort_order")
 
   isArchived Boolean   @default(false) @map("is_archived")
@@ -144,10 +178,12 @@ model Mahalla {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  district District        @relation(fields: [districtId], references: [id], onDelete: Restrict)
-  groups   TelegramGroup[]
-  issues   Issue[]
-  citizens Citizen[]
+  district   District          @relation(fields: [districtId], references: [id], onDelete: Restrict)
+  groups     TelegramGroup[]
+  issues     Issue[]
+  citizens   Citizen[]
+  assignees  MahallaAssignee[]
+  broadcasts Broadcast[]
 
   @@index([districtId, isArchived, sortOrder])
   @@map("mahallas")
@@ -233,15 +269,18 @@ model User {
 
   district District? @relation(fields: [districtId], references: [id], onDelete: SetNull)
 
-  officialGroups   TelegramGroup[] @relation("GroupOfficialBy")
-  guardedGroups    TelegramGroup[] @relation("GroupGuardBy")
-  attachedSignals  GroupSignal[]   @relation("SignalAttachedBy")
-  dismissedSignals GroupSignal[]   @relation("SignalDismissedBy")
-  authoredIssues   Issue[]         @relation("IssueAuthor")
-  assignedIssues   Issue[]         @relation("IssueAssignee")
-  reviewedIssues   Issue[]         @relation("IssueReviewedBy")
+  officialGroups   TelegramGroup[]   @relation("GroupOfficialBy")
+  guardedGroups    TelegramGroup[]   @relation("GroupGuardBy")
+  attachedSignals  GroupSignal[]     @relation("SignalAttachedBy")
+  dismissedSignals GroupSignal[]     @relation("SignalDismissedBy")
+  authoredIssues   Issue[]           @relation("IssueAuthor")
+  assignedIssues   Issue[]           @relation("IssueAssignee")
+  reviewedIssues   Issue[]           @relation("IssueReviewedBy")
   issueComments    IssueComment[]
   sessions         Session[]
+  assignmentRules  MahallaAssignee[] @relation("AssignmentRuleUser")
+  createdRules     MahallaAssignee[] @relation("AssignmentRuleAuthor")
+  broadcasts       Broadcast[]
 
   @@index([role, isArchived])
   @@index([districtId])
@@ -320,6 +359,34 @@ model TelegramGroup {
 
   canPostMessages Boolean @default(false) @map("can_post_messages")
   canInviteUsers  Boolean @default(false) @map("can_invite_users")
+
+  /// ── QALQON ISHLAY OLADIMI ───────────────────────────────────────
+  ///
+  /// ⚠️ `guardEnabled` — MA'MURIYAT XOHISHI, bu esa TELEGRAM
+  /// RUXSATI. Ikkisi boshqa-boshqa: qalqon yoqilgan bo'lishi, lekin
+  /// bot guruhda administrator bo'lmagani uchun hech narsa o'chira
+  /// olmasligi mumkin. Telegram o'shanda `400: message can't be
+  /// deleted` deb qaytaradi va SABABNI aytmaydi — panelda esa
+  /// "himoya ishlayapti" degan taassurot qolardi.
+  ///
+  /// ⚠️ IKKI MANBADAN TO'LADI: `my_chat_member` hodisasi (huquq
+  /// o'zgarganda) va o'chirish urinishi natijasi
+  /// (`bot/features/guard/delete-failure.ts`). Birinchisi bot shu
+  /// kod joylashtirilgandan KEYIN qo'shilgan guruhlarda ishlaydi,
+  /// ikkinchisi esa eskilarida — shuning uchun ikkalasi ham kerak.
+  canDeleteMessages Boolean @default(false) @map("can_delete_messages")
+
+  /// ── A'ZOLAR SONI ────────────────────────────────────────────────
+  ///
+  /// ⚠️ TELEGRAM'DAN O'QILADI (`getChatMemberCount`) va NUSXA
+  /// sifatida saqlanadi: panel ro'yxatni ko'rsatayotganda har guruh
+  /// uchun Telegram'ga borish mumkin emas (yuzlab guruh — yuzlab
+  /// so'rov va chegara).
+  ///
+  /// ⚠️ `null` — "hali o'qilmagan", `0` dan BOSHQA narsa. Nol deb
+  /// yozilsa, panel "guruhda hech kim yo'q" deb ko'rsatardi.
+  memberCount   Int?      @map("member_count")
+  memberCountAt DateTime? @map("member_count_at")
 
   /// ── KUZATUVGA ROZILIK ───────────────────────────────────────────
   ///
@@ -608,12 +675,34 @@ model IssueCategory {
   /// Qattiq o'chirish tarixni buzardi.
   isActive Boolean @default(true) @map("is_active")
 
+  /// ── KICHIK YO'NALISH (ota-bola) ───────────────────────
+  ///
+  /// ⚠️ IKKINCHI RO'YXAT OCHILMADI, SHU RO'YXAT CHUQURLASHTIRILDI.
+  /// "Yo'nalishlar ilovaga alohida ochilmaydi" doktrinasi kuchda:
+  /// bot ham, ilova ham, AI ham AYNI jadvalni o'qiydi. Ilova uchun
+  /// alohida mayda toifalar ochilsa, botdan va ilovadan kelgan
+  /// murojaatlar boshqa-boshqa yo'nalishga tushib, hisobotda IKKITA
+  /// ro'yxat paydo bo'lardi.
+  ///
+  /// ⚠️ CHUQURLIK — ATIGI IKKI DARAJA. Uch daraja ("Kommunal →
+  /// Suv → Ichimlik suvi → Bosim") hisobotni ham, botdagi tanlovni
+  /// ham o'qib bo'lmaydigan qilardi. Shuning uchun BOLANING BOLASI
+  /// bo'lmaydi — tekshiruv `categories.service.ts` da.
+  ///
+  /// ⚠️ `onDelete: Restrict`: ichida kichik yo'nalishlari bor
+  /// yo'nalishni o'chirish bolalarni "egasiz" qoldirardi.
+  parentId String? @map("parent_id")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  issues Issue[]
+  parent    IssueCategory?    @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  IssueCategory[]   @relation("CategoryTree")
+  issues    Issue[]
+  assignees MahallaAssignee[]
 
   @@index([isActive, sortOrder])
+  @@index([parentId, sortOrder])
   @@map("issue_categories")
 }
 
@@ -672,18 +761,18 @@ model Issue {
   ///
   /// Xaritada qadalgan nuqta (ixtiyoriy — suratsiz/joysiz ham murojaat
   /// qabul qilinadi).
-  lat Float?
-  lng Float?
+  lat            Float?
+  lng            Float?
   /// Fuqaro yozgan yoki xaritadan topilgan manzil matni.
-  address String?
+  address        String?
   /// Fuqaro belgilagan bayroqlar — TAXMIN, ustuvorlikni o'zgartirmaydi,
   /// panelda faqat ko'rsatiladi (CLAUDE.md "Ustuvorlikni AI taklifi
   /// o'zgartirmaydi" bilan ayni sabab).
-  isHazard       Boolean @default(false) @map("is_hazard")
-  isLongStanding Boolean @default(false) @map("is_long_standing")
-  isRepeatAppeal Boolean @default(false) @map("is_repeat_appeal")
+  isHazard       Boolean   @default(false) @map("is_hazard")
+  isLongStanding Boolean   @default(false) @map("is_long_standing")
+  isRepeatAppeal Boolean   @default(false) @map("is_repeat_appeal")
   /// Muammo qachon sodir bo'lgani (fuqaro ko'rsatsa).
-  occurredAt DateTime? @map("occurred_at")
+  occurredAt     DateTime? @map("occurred_at")
 
   /// Manba haqida barcha ma'lumot: guruh nomi, yozgan odam, xabar
   /// havolasi, AI toifasi.
@@ -702,6 +791,53 @@ model Issue {
   /// "muddatni surib qo'yish" amaliyotini tug'dirardi.
   dueAt DateTime? @map("due_at")
 
+  /// ── MUDDAT QAYERDAN KELDI ──────────────────────────
+  ///
+  /// ⚠️ "MUDDAT QANDAY BELGILANYAPTI?" — BU SAVOLGA JAVOB. Avval
+  /// panelda faqat sana turardi va u qayerdan kelgani (yo'nalish
+  /// SLA'simi, MFY qoidasimi, odam qo'yganmi) HECH QAYERDA
+  /// ko'rinmasdi — xodim sanani "tizim o'ylab topgan" deb qabul
+  /// qilardi.
+  ///
+  /// Qiymatlar: `category` | `rule` | `manual` | `ai`.
+  ///
+  /// ⚠️ MATN, ENUM EMAS: yangi manba qo'shilganda migratsiya
+  /// kerak bo'lmasligi uchun. Panel tanilmagan qiymatni KALIT
+  /// ko'rinishida ko'rsatadi (audit jurnalidagi ayni yondashuv).
+  dueSource String? @map("due_source")
+
+  /// ── TAKRORIY MUROJAAT (ommaviy hodisa) ──────────────────
+  ///
+  /// ⚠️ HAQIQIY HOLATDAN: transformator o'chsa, guruhda 20 odam
+  /// "svet o'chdi" deb yozadi. Ularning har birini alohida ijrochiga
+  /// yo'naltirish bitta muammoni YIGIRMA marta ishlashga majbur
+  /// qilardi — va yigirmasiga alohida javob yozish kerak bo'lardi.
+  ///
+  /// ⚠️ MUROJAAT O'CHIRILMAYDI VA BIRLASHTIRILMAYDI: har fuqaro
+  /// o'z murojaatini va unga javobni KO'RISHI kerak (ilovada
+  /// "murojaatlarim" ro'yxati — uning haqqi). Faqat BOG'LANADI:
+  /// asosiysi yopilganda bolalari ham birga yopiladi va javob
+  /// HAMMASIGA ketadi.
+  ///
+  /// ⚠️ O'Z-O'ZIGA HAVOLA: asosiy murojaatda `null`, takroriyda —
+  /// asosiysining id'si. Alohida "hodisa" jadvali ochilsa, bitta
+  /// murojaatli oddiy holat uchun ham bo'sh hodisa yozuvi
+  /// yaratilardi.
+  duplicateOfId String? @map("duplicate_of_id")
+
+  /// ── SHUBHALI MUROJAAT ───────────────────────────────
+  ///
+  /// ⚠️ O'CHIRILMAYDI, BELGILANADI. Haqiqiy holatda murojaat matni
+  /// fuqaroning O'Z ISMI bo'lgan, ilova esa tasodifiy rasm — ya'ni
+  /// odam tizimni sinab ko'rgan. Bunday yozuvni RAD ETISH xodimning
+  /// ishi; tizim faqat uni AJRATIB ko'rsatadi.
+  ///
+  /// ⚠️ AVTOMATIK RAD ETILMAYDI: "mazmunsiz" degan qaror xato
+  /// bo'lsa, haqiqiy muammo jimgina yo'qolardi — va buni hech kim
+  /// sezmasdi (fuqaro "yuborildi" degan xabarni olgan bo'lardi).
+  isSuspicious    Boolean @default(false) @map("is_suspicious")
+  suspicionReason String? @map("suspicion_reason")
+
   /// Yopilganda — kim, qachon va QANDAY hal qildi. `resolution`
   /// botdagi muallifga javob sifatida ketadi.
   resolution String?
@@ -712,6 +848,8 @@ model Issue {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   category    IssueCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  duplicateOf Issue?            @relation("IssueDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates  Issue[]           @relation("IssueDuplicates")
   mahalla     Mahalla?          @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
   author      User?             @relation("IssueAuthor", fields: [authorId], references: [id], onDelete: SetNull)
   citizen     Citizen?          @relation(fields: [citizenId], references: [id], onDelete: SetNull)
@@ -726,6 +864,11 @@ model Issue {
   @@index([categoryId, status])
   @@index([assigneeId, status])
   @@index([citizenId, createdAt(sort: Desc)])
+  /// ⚠️ Asosiy murojaatning takroriylarini topish uchun.
+  @@index([duplicateOfId])
+  /// ⚠️ Panel "shubhali" filtri — indekssiz butun jadval
+  /// skanerlanardi.
+  @@index([isSuspicious, createdAt(sort: Desc)])
   @@map("issues")
 }
 
@@ -887,6 +1030,24 @@ model Settings {
   /// Bitta murojaatga biriktiriladigan eng ko'p fayl.
   mobileMaxAttachments Int @default(5) @map("mobile_max_attachments")
 
+  /// ── TELEFON MAJBURIYMI ──────────────────────────────────────────
+  ///
+  /// ⚠️ STANDART — `true` VA BU ATAYLAB. Telefonsiz murojaatda xodim
+  /// odamga bog'lana olmaydi: Telegram ismi "ALHAMDULILLAX 🙌🙌" bo'lishi
+  /// mumkin, hudud esa "Belgilanmagan". Bunday murojaat navbatda
+  /// turadi-yu, hal qilib bo'lmaydi — aniq shu holat kuzatilgan.
+  ///
+  /// ⚠️ O'CHIRISH IMKONI QOLDIRILGAN, chunki talab O'ZGARUVCHAN:
+  /// raqam so'ralishi murojaat yuborishni sekinlashtiradi va
+  /// ma'muriyat uni vaqtincha yumshatishni xohlashi mumkin. Lekin
+  /// qiymat SOZLAMADA, kodda emas — o'zgartirish uchun deploy kerak
+  /// bo'lmasligi uchun.
+  ///
+  /// ⚠️ TEKSHIRUV MUROJAAT YARATISHDA, KIRISHDA EMAS: odam botni
+  /// ochib, ro'yxatni ko'rib, yangilik o'qishi mumkin — raqam faqat
+  /// MUROJAAT yozmoqchi bo'lganda so'raladi.
+  requirePhone Boolean @default(true) @map("require_phone")
+
   updatedAt DateTime @updatedAt @map("updated_at")
   updatedBy String?  @map("updated_by")
 
@@ -1016,6 +1177,21 @@ model SecurityEvent {
 
   /// Telegram rad etgan bo'lsa — sababi.
   errorMessage String? @map("error_message")
+
+  /// ── KO'RIB CHIQILDI (noto'g'ri o'chirish) ─────────────────
+  ///
+  /// ⚠️ DALIL O'ZGARMAYDI. `security_events` append-only bo'lib
+  /// qoladi: matn, havola, sabab va amal HECH QACHON tahrirlanmaydi.
+  /// Bu maydonlar — DALILNING O'ZI emas, uning ustidan chiqarilgan
+  /// ODAM XULOSASI ("bu havola zararli emas edi").
+  ///
+  /// ⚠️ KERAK, CHUNKI QALQON XATO QILADI: qoida qat'iy, lekin
+  /// dunyodagi hamma holatni qamray olmaydi. Noto'g'ri o'chirish
+  /// belgilanmasa, u hisobotda "aniqlangan tahdid" bo'lib sanalib,
+  /// qalqonning haqiqiy foydasini yashirardi.
+  isFalsePositive Boolean   @default(false) @map("is_false_positive")
+  reviewedBy      String?   @map("reviewed_by")
+  reviewedAt      DateTime? @map("reviewed_at")
 
   sentAt    DateTime? @map("sent_at")
   createdAt DateTime  @default(now()) @map("created_at")
@@ -1159,6 +1335,19 @@ model Citizen {
   /// Faollik bali — reyting shundan (`common/points.ts` yagona manba).
   points Int @default(0)
 
+  /// ── OXIRGI FAOLLIK ────────────────────────────────────────────
+  ///
+  /// ⚠️ "RO'YXATDAN O'TGAN" VA "FAOL" — BOSHQA-BOSHQA SON. Botni bir
+  /// marta ochib tashlab ketgan odam `citizens` da abadiy qoladi va
+  /// panelda "obunachilar" soni yildan-yilga o'sib, MA'NOSINI
+  /// yo'qotardi. Shu maydon "oxirgi 30 kunda nechta odam ishlatdi"
+  /// degan HAQIQIY savolga javob beradi.
+  ///
+  /// ⚠️ HAR SO'ROVDA EMAS, KUNIGA BIR MARTA yangilanadi
+  /// (`bot-citizens.service.ts`): har tugma bosilishida `UPDATE`
+  /// yozish bazani keraksiz band qilardi.
+  lastSeenAt DateTime? @map("last_seen_at")
+
   /// ⚠️ BLOK — CHEGARADAN QATTIQROQ CHORA. Butunlay yopadi. Shuning
   /// uchun `citizens.manage` ruxsati operatorga BERILMAYDI. Sabab
   /// MAJBURIY — fuqaroga ilovada ko'rsatiladi.
@@ -1178,6 +1367,9 @@ model Citizen {
   /// ⚠️ REYTING VA RO'YXATLAR `deletedAt: null` BO'YICHA FILTRLANADI —
   /// indekssiz u butun jadvalni skanerlab o'tardi.
   @@index([deletedAt])
+  /// ⚠️ "Oxirgi 30 kunda faol" sanog'i uchun — panel sarlavhasida
+  /// har ochilishda hisoblanadi.
+  @@index([lastSeenAt])
   @@map("citizens")
 }
 
@@ -1203,6 +1395,19 @@ model Announcement {
   /// `null` — qoralama (ilovada ko'rinmaydi). To'ldirilsa — nashr etilgan.
   publishedAt DateTime? @map("published_at")
 
+  /// ── REJALI NASHR ───────────────────────────────────
+  ///
+  /// ⚠️ `publishedAt` BILAN ARALASHTIRILMAYDI: biri — "qachon nashr
+  /// etilgan" (o'tmish, ro'yxat tartibi shundan), ikkinchisi —
+  /// "qachon nashr etilsin" (kelajak). Bitta maydonga sig'dirilsa,
+  /// kelajakdagi sana bilan yozuv ilovada ALLAQACHON nashr etilgandek
+  /// ko'rinardi.
+  ///
+  /// ⚠️ VAQTI KELGANDA CRON NASHR ETADI va `scheduledAt` TOZALANADI
+  /// — aks holda tahrirlangan e'lon qayta nashr etilib, ro'yxat
+  /// boshiga chiqib ketardi.
+  scheduledAt DateTime? @map("scheduled_at")
+
   /// Ko'rish sanog'i — ko'rsatkich, hisobot emas ("ot va unut").
   viewCount Int @default(0) @map("view_count")
 
@@ -1210,9 +1415,318 @@ model Announcement {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  district District? @relation(fields: [districtId], references: [id], onDelete: SetNull)
+  district District?           @relation(fields: [districtId], references: [id], onDelete: SetNull)
+  media    AnnouncementMedia[]
 
   @@index([publishedAt(sort: Desc)])
   @@index([districtId, publishedAt(sort: Desc)])
+  /// ⚠️ Cron har daqiqada "vaqti kelganlarini" so'raydi — indekssiz
+  /// u butun jadvalni skanerlab o'tardi.
+  @@index([scheduledAt])
   @@map("announcements")
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  IJROCHI QOIDASI — MFY × YO'NALISH → XODIM
+// ══════════════════════════════════════════════════════════════════════
+
+/// AVTOMATIK IJROCHI BIRIKTIRISH QOIDASI.
+///
+/// ── NIMA UCHUN ALOHIDA JADVAL ───────────────────────────────────────
+///
+/// ⚠️ QOIDA `Issue` DA SAQLANMAYDI va saqlanishi ham mumkin emas:
+/// murojaat yaratilayotganda ijrochi hali NOMA'LUM — aynan shu jadval
+/// uni aytib beradi. Teskarisi ham to'g'ri: qoida keyin
+/// o'zgartirilsa, ALLAQACHON yaratilgan murojaatning ijrochisi
+/// O'ZGARMAYDI (`Issue.assigneeId` — nusxa, jonli havola emas).
+/// Bo'lmasa, o'tgan oy kim ishlaganini bilib bo'lmay qolardi.
+///
+/// ⚠️ KALIT — MFY VA YO'NALISH BIRGALIKDA. "Chilonzor 12-MFY dagi
+/// suv muammosi — Aliyev" degan qoida shu ikki ustunda turadi.
+/// Faqat MFY bo'yicha qoida bo'lsa, bitta odamga MFY ning HAMMA
+/// muammosi tushardi; faqat yo'nalish bo'yicha bo'lsa, viloyatdagi
+/// barcha suv muammosi bitta xodimga ketardi.
+///
+/// ⚠️ BITTA JUFTLIKKA BITTA IJROCHI (`@@unique`): ikkitasi bo'lsa
+/// "qaysi biri" degan savol har murojaatda TASODIFIY hal bo'lardi.
+/// Bitta xodim bir nechta yo'nalishga biriktirilishi esa mumkin —
+/// bu oddiy holat (har qatorga bitta yo'nalish).
+model MahallaAssignee {
+  id String @id @default(cuid())
+
+  mahallaId  String @map("mahalla_id")
+  categoryId String @map("category_id")
+
+  /// ⚠️ XODIM, FUQARO EMAS: ijrochi panelga kiradigan `User`.
+  /// `Citizen` ga biriktirish murojaatni aholi qo'liga berardi.
+  userId String @map("user_id")
+
+  /// ⚠️ IXTIYORIY MUDDAT: berilgan bo'lsa, murojaatning `dueAt` i
+  /// yo'nalishning umumiy SLA'si o'rniga shundan hisoblanadi — bir
+  /// MFY da suv muammosi tezroq hal bo'lishi mumkin.
+  slaHours Int? @map("sla_hours")
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdBy String?  @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  mahalla  Mahalla       @relation(fields: [mahallaId], references: [id], onDelete: Cascade)
+  category IssueCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  user     User          @relation("AssignmentRuleUser", fields: [userId], references: [id], onDelete: Cascade)
+  author   User?         @relation("AssignmentRuleAuthor", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([mahallaId, categoryId])
+  @@index([userId])
+  @@index([categoryId])
+  @@map("mahalla_assignees")
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  TARQATMA — PANELDAN VA BOTDAN YUBORILADIGAN XABAR
+// ══════════════════════════════════════════════════════════════════════
+
+/// Tarqatma KIMGA ketadi.
+///
+/// ⚠️ `citizens` — SHAXSIY chat (botga yozgan odamlar), `groups` — MFY
+/// GURUHLARI. Ikkisi butunlay boshqa auditoriya va ularni bitta
+/// qiymatga birlashtirish "e'lonni guruhga yubordim, lekin odamlar
+/// ko'rmadi" degan holatni yashirardi.
+enum BroadcastAudience {
+  citizens
+  groups
+  both
+}
+
+/// Xabar QANDAY ketadi.
+///
+/// ⚠️ UCHTASI HAM KERAK va ular mijoz talabidan kelib chiqadi:
+///   text    — panelda yozilgan matn
+///   forward — botga tashlangan xabar "Forwarded from" bilan
+///   copy    — AYNI xabar, lekin manbasiz ("asl holatda")
+///
+/// ⚠️ `forward` VA `copy` FARQI KO'RINADIGAN: forward manbani
+/// ko'rsatadi (kanal nomi), copy esa botning o'z xabari bo'lib
+/// ko'rinadi. Qaysi biri kerakligi — yuboruvchining qarori.
+enum BroadcastMode {
+  text
+  forward
+  copy
+}
+
+/// ⚠️ `pending → sending → done/failed`. Oraliq holat KERAK: tarqatma
+/// minglab xabar bo'lishi mumkin va u FON'DA ketadi — HTTP so'rovi
+/// uni kutib turolmaydi (timeout). Panel holatni so'rab turadi.
+enum BroadcastStatus {
+  pending
+  sending
+  done
+  failed
+}
+
+/// TARQATMA YOZUVI — DALIL VA HOLAT.
+///
+/// ⚠️ YOZUV MAJBURIY: tarqatma — qaytarib bo'lmaydigan amal (yuborilgan
+/// xabarni o'qilmagan qilib bo'lmaydi). "Kim, qachon, kimga, nima
+/// yubordi" savoliga javob shu jadvalda. `AuditLog` ga faqat fakt
+/// yoziladi, matn esa bu yerda turadi.
+///
+/// ⚠️ APPEND-ONLY: tahrirlanmaydi. Yuborilgan xabar matnini keyin
+/// o'zgartirish dalilni soxtalashtirardi.
+model Broadcast {
+  id String @id @default(cuid())
+
+  audience BroadcastAudience
+  mode     BroadcastMode
+
+  /// `mode: text` uchun — yuborilgan matn.
+  text String?
+
+  /// ── FORWARD / COPY MANBASI ──────────────────────────────────────
+  ///
+  /// ⚠️ MANBA — ADMINNING SHAXSIY CHATI: u xabarni botga tashlaydi va
+  /// Telegram `forwardMessage`/`copyMessage` uchun aynan shu
+  /// (`from_chat_id`, `message_id`) juftligini talab qiladi. Baytlar
+  /// ko'chirilmaydi — Telegram xabarni O'ZI nusxalaydi.
+  ///
+  /// ⚠️ MANBA XABARI O'CHIRILSA TARQATMA ISHLAMAY QOLADI va bu
+  /// TUZATIB BO'LMAYDIGAN holat: shuning uchun yuborish darhol
+  /// boshlanadi, navbatda uzoq turmaydi.
+  fromChatId      String? @map("from_chat_id")
+  sourceMessageId String? @map("source_message_id")
+
+  /// ── QAMROV ──────────────────────────────────────────────────────
+  ///
+  /// ⚠️ IKKALASI HAM `null` — BUTUN VILOYAT. Bu eng kuchli amal va
+  /// shuning uchun u alohida ruxsat talab qiladi (`broadcast.send`).
+  districtId String? @map("district_id")
+  mahallaId  String? @map("mahalla_id")
+
+  status BroadcastStatus @default(pending)
+
+  /// ⚠️ UCHTA SON: `total` — topilgan manzil, `sent` — yetib borgani,
+  /// `failed` — rad etilgani (odam botni bloklagan). Ikkinchisi
+  /// birinchisiga TENG BO'LMASLIGI normal holat.
+  total  Int @default(0)
+  sent   Int @default(0)
+  failed Int @default(0)
+
+  /// Butun tarqatma yiqilgan bo'lsa — sabab.
+  error String?
+
+  /// ⚠️ KIM YUBORGANI — `User`, ya'ni XODIM. Botdan yuborilganda ham
+  /// shu: admin `User.telegramId` bo'yicha topiladi.
+  createdBy String @map("created_by")
+
+  /// `panel` yoki `bot` — qaysi yo'ldan yuborilgani.
+  via String @default("panel")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  startedAt  DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  author   User      @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  district District? @relation(fields: [districtId], references: [id], onDelete: SetNull)
+  mahalla  Mahalla?  @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+  @@index([status])
+  @@map("broadcasts")
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  TAHDID RO'YXATLARI — TASHQI, O'ZI YANGILANADIGAN MANBALAR
+// ══════════════════════════════════════════════════════════════════════
+
+/// Ro'yxat fayli qanday o'qiladi.
+///
+/// ⚠️ TO'RT SHAKL, chunki manbalar bir xil emas:
+///   hosts    — `0.0.0.0 evil.com` (AdGuard/StevenBlack uslubi)
+///   domains  — har qatorda bitta domen
+///   adguard  — `||evil.com^` (AdGuard filtr sintaksisi)
+///   urlhaus  — URLhaus CSV (to'liq havola, hostni ajratib olamiz)
+///
+/// ⚠️ SHAKL AVTOMATIK ANIQLANMAYDI, QO'LDA TANLANADI: manba bir kun
+/// formatini o'zgartirsa, avtomatik aniqlash JIMGINA noto'g'ri
+/// tahlilga o'tib, ro'yxat bo'shab qolardi — himoya esa o'chgandek
+/// bo'lardi.
+enum ThreatFeedFormat {
+  hosts
+  domains
+  adguard
+  urlhaus
+}
+
+/// TASHQI TAHDID RO'YXATI (fishing / zararli domenlar).
+///
+/// ── NIMA UCHUN KERAK ────────────────────────────────────────────────
+///
+/// ⚠️ QORA RO'YXAT QO'LDA TO'LDIRILADI va u HAR DOIM KECHIKADI: yangi
+/// firibgar domen ertalab paydo bo'lib, kechqurun bloklanardi — oradagi
+/// vaqtda aholi havolani bosib ulgurardi. Tashqi ro'yxatlar (URLhaus,
+/// PhishTank, AdGuard) esa SOATLAB yangilanadi va ularni o'qish
+/// qo'lda kiritishdan ko'ra tezroq.
+///
+/// ⚠️ QO'LDAGI RO'YXAT O'RNINI BOSMAYDI, QO'SHIMCHA: mahalliy
+/// firibgar domenlar (`uzbekistonviplata.xyz`) tashqi ro'yxatlarga
+/// umuman tushmaydi. Ikkisi BIRGA ishlaydi.
+///
+/// ⚠️ OQ RO'YXAT USTUN: `gov.uz` tashqi ro'yxatda xato bilan paydo
+/// bo'lsa ham o'chirilmaydi (`inspectUrl` dagi tartib).
+model ThreatFeed {
+  id String @id @default(cuid())
+
+  name String @unique
+  url  String
+
+  format ThreatFeedFormat @default(domains)
+
+  /// ⚠️ O'CHIRILGAN RO'YXAT YANGILANMAYDI, lekin HOSTLARI QOLADI —
+  /// qayta yoqilganda qaytadan yuklab o'tirmaslik uchun. Butunlay
+  /// olib tashlash — yozuvni o'chirish (hostlari `Cascade` bilan
+  /// ketadi).
+  isEnabled Boolean @default(true) @map("is_enabled")
+
+  /// ── OXIRGI YANGILANISH ──────────────────────────────────────────
+  ///
+  /// ⚠️ XATO SAQLANADI: ro'yxat bir hafta yuklanmay turgan bo'lsa,
+  /// panel buni KO'RSATISHI kerak — aks holda himoya eskirib
+  /// ketganini hech kim sezmasdi.
+  lastFetchedAt DateTime? @map("last_fetched_at")
+  lastCount     Int       @default(0) @map("last_count")
+  lastError     String?   @map("last_error")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  hosts ThreatHost[]
+
+  @@map("threat_feeds")
+}
+
+/// RO'YXATDAN OLINGAN BITTA HOST.
+///
+/// ⚠️ `host` BIRLAMCHI KALIT EMAS: bir domen bir necha ro'yxatda
+/// bo'lishi mumkin va ikkalasidan ham o'chirilganda yo'qolishi kerak.
+/// Shuning uchun kalit — `(feedId, host)` juftligi.
+///
+/// ⚠️ HOST NORMALLASHTIRILGAN HOLDA SAQLANADI (`normalizeHost`:
+/// kichik harf, `www.` yo'q, oxirgi nuqta yo'q) — qidiruv aynan
+/// shu shaklda boradi va ikki tomonda ikki xil normallashtirish
+/// JIM nomuvofiqlik berardi.
+model ThreatHost {
+  feedId String @map("feed_id")
+  host   String
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  feed ThreatFeed @relation(fields: [feedId], references: [id], onDelete: Cascade)
+
+  @@id([feedId, host])
+  /// ⚠️ HOST BO'YICHA INDEKS: botga beriladigan ro'yxat `distinct`
+  /// bilan yig'iladi va usiz butun jadval skanerlanardi.
+  @@index([host])
+  @@map("threat_hosts")
+}
+
+/// E'LONGA BIRIKTIRILGAN FAYL (surat/video).
+///
+/// ── NIMA UCHUN ALOHIDA JADVAL ─────────────────────────────
+///
+/// ⚠️ ESKI `coverPath` BITTA SURAT EDI va e'lonning asosiy mazmuni
+/// ko'pincha RASMDA bo'ladi (jadval, e'lon varaqasi, buzilgan joy
+/// surati). Bitta muqova bilan ularning birini tanlab, qolganini
+/// tashlab ketish kerak bo'lardi.
+///
+/// ⚠️ `IssueAttachment` BILAN AYNI MANTIQ, LEKIN ALOHIDA JADVAL:
+/// murojaat fayli — DALIL (append-only, murojaat bilan birga
+/// o'chadi), e'lon fayli esa BEZAK va u e'lon tahrirlanganda
+/// almashtirilishi mumkin. Bitta jadvalga qo'shilsa, dalilni
+/// o'chirish yo'li ochilardi.
+model AnnouncementMedia {
+  id String @id @default(cuid())
+
+  announcementId String @map("announcement_id")
+
+  kind IssueAttachmentKind
+
+  /// ⚠️ DISKDAGI YO'L, BAZADAGI BAYTLAR EMAS (`uploads.service.ts`
+  /// qoidasi). Nom — `randomUUID()`, asl nom yo'l sifatida
+  /// ISHLATILMAYDI (`../../.env`).
+  path         String
+  mimeType     String  @map("mime_type")
+  size         Int
+  originalName String? @map("original_name")
+
+  /// ⚠️ TARTIB QO'LDA: ilovada fayllar aynan shu ketma-ketlikda
+  /// ko'rinadi va yuklash vaqti bo'yicha tartib tasodifiy bo'lardi.
+  sortOrder Int @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  @@index([announcementId, sortOrder])
+  @@map("announcement_media")
 }

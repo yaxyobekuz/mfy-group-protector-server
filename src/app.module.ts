@@ -34,6 +34,7 @@ import { SettingsModule } from "./modules/settings/settings.module";
 import { AuditModule } from "./modules/audit/audit.module";
 import { MobileModule } from "./modules/mobile/mobile.module";
 import { AnnouncementsModule } from "./modules/announcements/announcements.module";
+import { BroadcastsModule } from "./modules/broadcasts/broadcasts.module";
 import { CitizensModule } from "./modules/citizens/citizens.module";
 import { HealthModule } from "./modules/health/health.module";
 import { LegalModule } from "./modules/legal/legal.module";
@@ -68,6 +69,7 @@ import { LegalModule } from "./modules/legal/legal.module";
     MobileModule,
     AnnouncementsModule,
     CitizensModule,
+    BroadcastsModule,
     // Ommaviy sahifalar (`/privacy`, `/terms`, `/delete-account`) va
     // monitoring (`/api/health`) — ikkisi ham `@Public()`.
     LegalModule,

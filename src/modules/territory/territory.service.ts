@@ -20,6 +20,8 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 
+import type { Prisma } from "@prisma/client";
+
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../../common/audit.service";
 import {
@@ -31,6 +33,7 @@ import {
 import type {
   CreateDistrictDto,
   CreateMahallaDto,
+  ImportMahallaGeoDto,
   UpdateDistrictDto,
   UpdateMahallaDto,
 } from "./dto/territory.dto";
@@ -70,6 +73,32 @@ export class TerritoryService {
       },
     });
 
+    /**
+     * MFY LARDAGI AHOLI YIG'INDISI.
+     *
+     * ⚠️ TUMANNING O'Z USTUNI BILAN YONMA-YON KO'RSATILADI, uning
+     * O'RNIGA emas: ikkisi farq qilsa, bu MFY lardagi aholi
+     * to'liq to'ldirilmagani degani va panelda buni KO'RISH
+     * kerak — aks holda xodim "1000 kishiga" ko'rsatkichidagi
+     * g'alati raqamning sababini topa olmasdi.
+     *
+     * ⚠️ BITTA SO'ROVDA (`groupBy`), har tuman uchun alohida emas:
+     * viloyatda 14 tuman bor va 14 ta so'rov ro'yxat ochilishini
+     * sezilarli sekinlashtirardi.
+     */
+    const sums = await this.prisma.mahalla.groupBy({
+      by: ["districtId"],
+      where: {
+        isArchived: false,
+        districtId: { in: districts.map((district) => district.id) },
+      },
+      _sum: { population: true },
+    });
+
+    const sumByDistrict = new Map(
+      sums.map((row) => [row.districtId, row._sum.population ?? 0]),
+    );
+
     return districts.map((district) => ({
       id: district.id,
       code: district.code,
@@ -77,6 +106,8 @@ export class TerritoryService {
       sortOrder: district.sortOrder,
       isArchived: district.isArchived,
       mahallaCount: district._count.mahallas,
+      population: district.population,
+      mahallaPopulation: sumByDistrict.get(district.id) ?? 0,
       createdAt: district.createdAt,
     }));
   }
@@ -94,6 +125,9 @@ export class TerritoryService {
       data: {
         code: this.normalizeCode(dto.code),
         name: dto.name.trim(),
+        // ⚠️ `?? null` — "berilmadi" ni NOL deb yozib qo'ymaslik
+        // uchun: nol aholi "1000 kishiga" ni cheksizga aylantirardi.
+        population: dto.population ?? null,
         sortOrder: dto.sortOrder ?? 0,
       },
     });
@@ -122,6 +156,10 @@ export class TerritoryService {
       data: {
         ...(dto.code !== undefined ? { code: this.normalizeCode(dto.code) } : {}),
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+        // ⚠️ `undefined` TEKSHIRILADI, `||` ISHLATILMAYDI: `0`
+        // haqiqiy qiymat bo'lishi mumkin emas, lekin `||` bilan
+        // yozilsa u jimgina tushib qolardi.
+        ...(dto.population !== undefined ? { population: dto.population } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
       },
     });
@@ -226,7 +264,86 @@ export class TerritoryService {
       isArchived: mahalla.isArchived,
       groupCount: mahalla._count.groups,
       issueCount: mahalla._count.issues,
+      /**
+       * ⚠️ POLIGONNING O'ZI EMAS, BOR-YO'QLIGI: bitta MFY
+       * chegarasi yuzlab koordinatadan iborat va ro'yxatda ularni
+       * tashish javobni megabaytlarga oshirardi. Xarita ularni
+       * ALOHIDA so'rov bilan oladi (`/reports/mahalla-map`), panelga
+       * esa faqat "chegara bormi" degan javob kerak.
+       */
+      hasGeo: mahalla.geoJson !== null,
     }));
+  }
+
+  /**
+   * MFY CHEGARALARINI IMPORT QILADI (GeoJSON).
+   *
+   * ── NIMA UCHUN NOM BO'YICHA ─────────────────────────────
+   *
+   * ⚠️ TASHQI MANBADA BIZNING ID'LARIMIZ YO'Q. Chegaralar kadastr
+   * yoki OSM eksportidan keladi va ular MFY ni faqat NOMI bilan
+   * biladi.
+   *
+   * ⚠️ TUMAN NOMI MAJBURIY: viloyatda BIR XIL NOMLI MFY lar bor
+   * (har tumanda "Turon", "Birlik") va tumansiz import tasodifiy
+   * MFY ga tushardi — xaritada esa buni sezish deyarli imkonsiz.
+   *
+   * ⚠️ TOPILMAGANLARI QAYTARILADI: import "muvaffaqiyatli" deb
+   * tugab, aslida yarmi tushmay qolishi mumkin.
+   *
+   * ⚠️ QAMROV TEKSHIRILADI: tuman xodimi boshqa tumanning
+   * chegarasini yoza olmaydi.
+   */
+  async importMahallaGeo(dto: ImportMahallaGeoDto, scope: ScopeContext) {
+    const normalize = (value: string): string =>
+      value.trim().toLocaleLowerCase("uz").replace(/[‘’ʻʼ`']/g, "'");
+
+    const mahallas = await this.prisma.mahalla.findMany({
+      where: { isArchived: false, ...districtScopeWhere(scope) },
+      select: { id: true, name: true, district: { select: { name: true } } },
+    });
+
+    const index = new Map<string, string>();
+    for (const mahalla of mahallas) {
+      index.set(
+        `${normalize(mahalla.district.name)}|${normalize(mahalla.name)}`,
+        mahalla.id,
+      );
+    }
+
+    let updated = 0;
+    const missing: string[] = [];
+
+    for (const item of dto.items) {
+      const id = index.get(`${normalize(item.districtName)}|${normalize(item.name)}`);
+
+      if (!id) {
+        missing.push(`${item.districtName} / ${item.name}`);
+        continue;
+      }
+
+      await this.prisma.mahalla.update({
+        where: { id },
+        data: {
+          geoJson: item.geoJson as Prisma.InputJsonValue,
+          // ⚠️ MARKAZ FAQAT BERILGANDA YOZILADI: u xaritada
+          // qo'lda to'g'rilangan bo'lishi mumkin.
+          ...(item.lat !== undefined ? { lat: item.lat } : {}),
+          ...(item.lng !== undefined ? { lng: item.lng } : {}),
+        },
+      });
+
+      updated += 1;
+    }
+
+    await this.audit.record({
+      userId: scope.userId,
+      action: "territory.import-geo",
+      entity: "Mahalla",
+      meta: { updated, missing: missing.length },
+    });
+
+    return { updated, missing };
   }
 
   async createMahalla(dto: CreateMahallaDto, scope: ScopeContext) {

@@ -41,6 +41,7 @@ import {
   type IssuePriority,
   type Prisma,
 } from "@prisma/client";
+import { AssignmentRulesService } from "./assignment-rules.service";
 import { IssueNotifyService } from "./issue-notify.service";
 import type {
   AddCommentDto,
@@ -64,6 +65,7 @@ export class IssuesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly notify: IssueNotifyService,
+    private readonly rules: AssignmentRulesService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════
@@ -95,10 +97,26 @@ export class IssuesService {
   ) {
     const category = await tx.issueCategory.findUnique({
       where: { id: input.categoryId },
-      select: { id: true, isActive: true },
+      select: { id: true, isActive: true, slaHours: true },
     });
     if (!category) throw new NotFoundException("Kategoriya topilmadi");
     if (!category.isActive) throw new BadRequestException("Kategoriya faol emas");
+
+    /**
+     * ⚠️ IJROCHI QOIDASI SIGNALDA HAM ISHLAYDI: signaldan chiqqan
+     * muammo ham o'sha MFY ning o'sha yo'nalishiga tegishli va uni
+     * boshqacha taqsimlash "botdan kelgani bir xodimda, signaldan
+     * kelgani boshqasida" degan chalkashlik tug'dirardi.
+     *
+     * ⚠️ HOLAT `new` BO'LIB QOLADI — `assignment-rules.service.ts`
+     * izohi: biriktirish avtomatik bo'lgani ish boshlanganini
+     * bildirmaydi.
+     */
+    const auto = await this.rules.fieldsFor(
+      input.mahallaId,
+      input.categoryId,
+      category.slaHours,
+    );
 
     return tx.issue.create({
       data: {
@@ -111,6 +129,9 @@ export class IssuesService {
         priority: input.priority,
         authorId: input.authorId,
         sourceMeta: input.sourceMeta,
+        ...(auto
+          ? { assigneeId: auto.assigneeId, dueAt: auto.dueAt, dueSource: "rule" }
+          : {}),
       },
       select: { id: true, publicNo: true },
     });
@@ -120,7 +141,7 @@ export class IssuesService {
   async create(dto: CreateIssueDto, scope: ScopeContext) {
     const category = await this.prisma.issueCategory.findUnique({
       where: { id: dto.categoryId },
-      select: { id: true, isActive: true },
+      select: { id: true, isActive: true, slaHours: true },
     });
     if (!category) throw new NotFoundException("Kategoriya topilmadi");
     if (!category.isActive) throw new BadRequestException("Kategoriya faol emas");
@@ -137,6 +158,18 @@ export class IssuesService {
       }
     }
 
+    /**
+     * ⚠️ QO'LDA KO'RSATILGAN IJROCHI USTUN: qoida — ZAXIRA javob,
+     * odamning qarorini bosib o'tmaydi. Shuning uchun qoida faqat
+     * `assigneeId` BERILMAGANDA qidiriladi.
+     *
+     * ⚠️ MUDDAT HAM SHUNDAY: panelda `dueAt` yozilgan bo'lsa,
+     * qoidadagi SLA unga tegmaydi.
+     */
+    const auto = dto.assigneeId
+      ? null
+      : await this.rules.fieldsFor(dto.mahallaId, dto.categoryId, category.slaHours);
+
     const issue = await this.prisma.issue.create({
       data: {
         publicNo: await this.nextPublicNo(this.prisma),
@@ -146,9 +179,15 @@ export class IssuesService {
         title: dto.title.trim(),
         body: dto.body.trim(),
         priority: dto.priority,
-        dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
+        dueAt: dto.dueAt ? new Date(dto.dueAt) : (auto?.dueAt ?? null),
+        /**
+         * ⚠️ MUDDAT QAYERDAN KELGANI YOZILADI: panel "qo'lda
+         * qo'yilganmi, qoidadanmi" degan savolga javobni shundan
+         * oladi. Avval faqat sana turardi.
+         */
+        dueSource: dto.dueAt ? "manual" : auto ? "rule" : null,
         authorId: scope.userId,
-        assigneeId: dto.assigneeId ?? null,
+        assigneeId: dto.assigneeId ?? auto?.assigneeId ?? null,
         sourceMeta: { channel: "panel" },
       },
       select: { id: true, publicNo: true },
@@ -202,6 +241,14 @@ export class IssuesService {
       ...(query.overdue
         ? { dueAt: { lt: new Date() }, status: { notIn: CLOSED_STATUSES } }
         : {}),
+      ...(query.suspicious ? { isSuspicious: true } : {}),
+      /**
+       * ⚠️ `true` — FAQAT TAKRORIYLARI, `false` — FAQAT ASOSIYLARI.
+       * Berilmasa HAMMASI: standart ro'yxat to'liq bo'lishi kerak,
+       * aks holda murojaat "yo'qolgan" dek ko'rinardi.
+       */
+      ...(query.duplicates === true ? { duplicateOfId: { not: null } } : {}),
+      ...(query.duplicates === false ? { duplicateOfId: null } : {}),
       ...(query.search
         ? {
             OR: [
@@ -227,7 +274,10 @@ export class IssuesService {
           assignee: { select: { id: true, firstName: true, lastName: true } },
           author: { select: { id: true, firstName: true, lastName: true } },
           citizen: { select: { id: true, firstName: true, lastName: true } },
-          _count: { select: { comments: true } },
+          // ⚠️ TAKRORIYLAR SONI RO'YXATDA KO'RINADI: "bu bitta
+          // murojaat emas, 20 ta odam yozgan" degan ma'lumot xodimga
+          // ustuvorlikni tushunish uchun kerak.
+          _count: { select: { comments: true, duplicates: true } },
         },
       }),
       this.prisma.issue.count({ where }),
@@ -263,6 +313,16 @@ export class IssuesService {
         issue.dueAt.getTime() < now &&
         !CLOSED_STATUSES.includes(issue.status),
       commentCount: issue._count.comments,
+      /**
+       * ⚠️ TAKRORIYLAR SONI: "bu bitta murojaat emas, 20 ta odam
+       * yozgan" — ustuvorlikni tushunish uchun eng muhim belgi.
+       */
+      duplicateCount: issue._count.duplicates,
+      /** ⚠️ O'ZI TAKRORIYMI (asosiysi boshqa yozuv). */
+      isDuplicate: issue.duplicateOfId !== null,
+      duplicateOfId: issue.duplicateOfId,
+      isSuspicious: issue.isSuspicious,
+      suspicionReason: issue.suspicionReason,
       createdAt: issue.createdAt,
       resolvedAt: issue.reviewedAt,
     }));
@@ -292,6 +352,21 @@ export class IssuesService {
           select: { id: true, firstName: true, lastName: true, username: true, phone: true, telegramId: true },
         },
         reviewer: { select: { id: true, firstName: true, lastName: true } },
+        /**
+         * ⚠️ TAKRORIYLAR RO'YXATI: xodim "shu bitta javob 20
+         * odamga ketadi" degan narsani KO'RISHI kerak — aks holda u
+         * javobni bitta odamga yozgandek yozardi.
+         */
+        duplicates: {
+          select: {
+            id: true,
+            publicNo: true,
+            createdAt: true,
+            citizen: { select: { id: true, firstName: true, lastName: true } },
+          },
+          orderBy: { createdAt: "asc" },
+        },
+        duplicateOf: { select: { id: true, publicNo: true, title: true } },
         // Fuqaro yuborgan dalil fayllari.
         attachments: {
           select: { id: true, kind: true, path: true, mimeType: true, size: true },
@@ -383,6 +458,10 @@ export class IssuesService {
       data: {
         assigneeId: dto.assigneeId ?? null,
         dueAt: dto.dueAt !== undefined ? (dto.dueAt ? new Date(dto.dueAt) : null) : undefined,
+        // ⚠️ MUDDATNI ODAM O'ZGARTIRDI — manba ham shunga
+        // yangilanadi, aks holda panel eski manbani ko'rsatib,
+        // "yo'nalish SLA'si" deb yolg'on gapirardi.
+        ...(dto.dueAt !== undefined ? { dueSource: dto.dueAt ? "manual" : null } : {}),
         ...(dto.assigneeId && issue.status === IssueStatus.new
           ? { status: IssueStatus.in_progress }
           : {}),
@@ -466,7 +545,121 @@ export class IssuesService {
         .catch(() => undefined);
     }
 
+    /**
+     * ── TAKRORIY MUROJAATLAR BIRGA YOPILADI ───────────────────
+     *
+     * ⚠️ HAQIQIY HOLATDAN: transformator o'chsa, guruhda 20 odam
+     * "svet o'chdi" deb yozadi. Ularning har biriga ALOHIDA javob
+     * yozish bitta ishni yigirma marta qilish degani edi — va
+     * xodim oxirgi beshtasini yozmay qo'yardi.
+     *
+     * ⚠️ JAVOB HAMMASIGA KETADI: har fuqaro o'z murojaatiga
+     * javob olishi kerak (ilovada "murojaatlarim" — uning haqqi).
+     * Faqat asosiysiga javob berilsa, qolgan 19 odam javobsiz
+     * qolardi.
+     *
+     * ⚠️ YOPILGANLARI TEGILMAYDI: kimdir qo'lda yopib ulgurgan
+     * bo'lishi mumkin va uning javobi qayta yozilmasligi kerak.
+     */
+    await this.closeDuplicates(id, dto, scope, updated.publicNo);
+
     return updated;
+  }
+
+  /**
+   * ASOSIY MUROJAAT BILAN BIRGA TAKRORIYLARINI YOPADI.
+   *
+   * ⚠️ XATO YUTILADI: asosiy murojaat ALLAQACHON yopilgan va
+   * takroriylar bilan bog'liq muammo uni qaytarib ochmasligi kerak.
+   *
+   * ⚠️ KETMA-KET XABAR (`issue-notify` bilan ayni sabab): Telegram
+   * 429 bermasligi uchun.
+   */
+  private async closeDuplicates(
+    parentId: string,
+    dto: ResolveIssueDto,
+    scope: ScopeContext,
+    parentPublicNo: string,
+  ): Promise<void> {
+    try {
+      const duplicates = await this.prisma.issue.findMany({
+        /**
+         * ⚠️ SHUBHALI MUROJAAT BIRGA YOPILMAYDI — IKKINCHI
+         * QALQON. Triaj uni takroriy deb ulamaydi
+         * (`appeal-triage.service.ts`), lekin xodim uni QO'LDA
+         * ulagan bo'lishi mumkin. Shundayam avtomatik yopmaslik
+         * kerak: mazmunsiz matnli murojaat egasiga BEGONA javob
+         * ketardi.
+         */
+        where: {
+          duplicateOfId: parentId,
+          status: { notIn: CLOSED_STATUSES },
+          isSuspicious: false,
+        },
+        select: {
+          id: true,
+          publicNo: true,
+          title: true,
+          citizenId: true,
+          authorChatId: true,
+          citizen: { select: { telegramId: true } },
+        },
+      });
+
+      if (duplicates.length === 0) return;
+
+      const status = dto.rejected ? IssueStatus.rejected : IssueStatus.resolved;
+      const resolution = dto.resolution.trim();
+
+      await this.prisma.issue.updateMany({
+        where: { id: { in: duplicates.map((item) => item.id) } },
+        data: {
+          status,
+          resolution,
+          reviewedBy: scope.userId,
+          reviewedAt: new Date(),
+        },
+      });
+
+      await this.audit.record({
+        userId: scope.userId,
+        action: dto.rejected ? "issue.reject.bulk" : "issue.resolve.bulk",
+        entity: "Issue",
+        entityId: parentId,
+        meta: {
+          publicNo: parentPublicNo,
+          closed: duplicates.length,
+          reason: "takroriy murojaatlar",
+        },
+      });
+
+      for (const duplicate of duplicates) {
+        await this.notify.sendResolution({
+          chatId: this.replyChatId(duplicate),
+          publicNo: duplicate.publicNo,
+          title: duplicate.title,
+          resolution,
+          rejected: Boolean(dto.rejected),
+        });
+
+        if (!dto.rejected && duplicate.citizenId) {
+          await this.prisma.citizen
+            .update({
+              where: { id: duplicate.citizenId },
+              data: { points: { increment: POINTS.APPEAL_RESOLVED } },
+            })
+            .catch(() => undefined);
+        }
+      }
+
+      this.logger.log(
+        `${parentPublicNo}: ${duplicates.length} ta takroriy murojaat birga yopildi`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Takroriy murojaatlar yopilmadi (${parentId}): ${(error as Error).message}`,
+      );
+    }
   }
 
   /**

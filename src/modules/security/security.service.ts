@@ -130,6 +130,27 @@ export class SecurityService {
     // `create`. Bu kamdan-kam holat (Telegram deyarli har doim
     // raqam beradi), lekin `upsert` undefined kalit bilan
     // yiqilardi.
+    /**
+     * ── QALQON ISHLAY OLADIMI ──────────────────────────────────
+     *
+     * ⚠️ HODISA YOZUVIDAN OLDIN: qalqon yoqilgan, lekin bot admin
+     * emas degan holat PANELDA ko'rinishi kerak. Eski kodda bu
+     * holat faqat `errorMessage` dagi inglizcha satrda turardi
+     * (`message can't be deleted`) va undan nima qilish kerakligi
+     * bilinmasdi.
+     *
+     * ⚠️ `undefined` BO'LSA TEGILMAYDI: "bilinmadi" ni `false` deb
+     * yozish panelda yo'q muammo haqida ogohlantirish chiqarardi.
+     */
+    if (dto.botCanDelete !== undefined) {
+      await this.prisma.telegramGroup
+        .update({
+          where: { chatId: dto.chatId },
+          data: { canDeleteMessages: dto.botCanDelete },
+        })
+        .catch(() => undefined);
+    }
+
     const event = dto.messageId
       ? await this.prisma.securityEvent.upsert({
           where: {
@@ -177,6 +198,16 @@ export class SecurityService {
     if (query.kind) where.kind = query.kind;
     if (query.action) where.action = query.action;
     if (query.senderTgId) where.senderTgId = query.senderTgId;
+
+    /**
+     * ⚠️ NOTO'G'RI O'CHIRISHLAR ALOHIDA KO'RILADI: ular qoidaning
+     * XATOSI haqidagi yagona dalil va umumiy ro'yxatda minglab
+     * haqiqiy tahdid orasida ko'rinmay ketardi. Panelda ular
+     * bo'yicha ALOHIDA filtr bor.
+     */
+    if (query.falsePositive !== undefined) {
+      where.isFalsePositive = query.falsePositive;
+    }
 
     if (query.districtId || query.mahallaId) {
       where.group = {
@@ -229,14 +260,186 @@ export class SecurityService {
     return paginate(items, total, query);
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  //  NOTO'G'RI O'CHIRISHNI TUZATISH
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * HODISANI "NOTO'G'RI" DEB BELGILAYDI VA HOSTNI OQ RO'YXATGA
+   * QO'SHADI.
+   *
+   * ── NIMA UCHUN KERAK ────────────────────────────────────────────
+   *
+   * ⚠️ ODDIY HAVOLA HAM BLOKLANISHI MUMKIN va bu TIRIK holat: qora
+   * ro'yxatlar tashqi manbadan keladi (50 000 host) va ularga
+   * qonuniy sayt xato bilan tushishi mumkin; qisqartirgich qoidasi
+   * esa `t.me/...` ko'rinishidagi har havolani ushlaydi. Bunday
+   * paytda guruh a'zosining xabari jimgina o'chib ketadi — bot
+   * ogohlantirish YOZMAYDI, ya'ni buni faqat panelda ko'rish
+   * mumkin.
+   *
+   * ⚠️ IKKI AMAL BITTA TUGMADA: hodisani belgilash XATO haqida
+   * dalil qoldiradi, oq ro'yxat esa uning QAYTALANMASLIGINI
+   * ta'minlaydi. Faqat belgilansa, ertasi kuni o'sha havola yana
+   * o'chirilardi va xodim yana belgilardi — cheksiz.
+   *
+   * ── HODISA O'CHIRILMAYDI ────────────────────────────────────────
+   *
+   * ⚠️ `security_events` — APPEND-ONLY (doktrina): yozuv
+   * O'CHIRILMAYDI, faqat BELGILANADI. Noto'g'ri o'chirishlar
+   * ro'yxati — qoidani tuzatish uchun yagona manba va uni
+   * tozalash o'sha dalilni yo'q qilardi.
+   *
+   * ⚠️ O'CHIRILGAN XABARNI QAYTARIB BO'LMAYDI: Telegram API da
+   * bunday imkon YO'Q. Ya'ni "tiklash" — xabarni emas, HAVOLANI
+   * tiklash: bundan keyin u o'chirilmaydi.
+   */
+  async allowEvent(
+    id: string,
+    scope: ScopeContext,
+    userId: string,
+    ip?: string,
+  ) {
+    const event = await this.prisma.securityEvent.findUnique({
+      where: { id },
+      include: { group: { select: { mahalla: { select: { districtId: true } } } } },
+    });
+
+    if (!event) throw new NotFoundException("Hodisa topilmadi");
+
+    // ⚠️ QAMROV TEKSHIRUVI ALOHIDA (`Ruxsat ≠ qamrov` doktrinasi):
+    // id bilan keladigan amal ro'yxat filtridan O'TMAYDI.
+    const districtId = event.group?.mahalla?.districtId ?? null;
+    if (districtId && !canTouchDistrict(scope, districtId)) {
+      throw new BadRequestException("Bu hodisa sizning qamrovingizda emas");
+    }
+
+    const host = this.hostOf(event.urlHost, event.url);
+
+    /**
+     * ⚠️ HOST BO'LMASA — FAQAT BELGILANADI: fayl qoidasi (`.apk`)
+     * bo'yicha o'chirilgan hodisada host umuman yo'q va unda oq
+     * ro'yxatga qo'shadigan narsa ham yo'q. Xato bermaslik kerak:
+     * xodim baribir "bu noto'g'ri edi" deb belgilashi mumkin
+     * bo'lishi kerak.
+     */
+    let allowedHost: string | null = null;
+
+    if (host) {
+      // ⚠️ `"singleton"` — sozlama BITTA QATOR (fayldagi
+      // `guardConfig` bilan ayni kalit): `findFirst` ishlatilsa,
+      // test bazasida ikkinchi qator paydo bo'lganda tasodifiy
+      // biri olinardi.
+      const settings = await this.prisma.settings.findUnique({
+        where: { id: "singleton" },
+        select: { id: true, guardAllowedHosts: true, guardBlockedHosts: true },
+      });
+
+      if (settings) {
+        const allowed = new Set(settings.guardAllowedHosts);
+
+        if (!allowed.has(host)) {
+          allowed.add(host);
+          allowedHost = host;
+        }
+
+        /**
+         * ⚠️ QO'LDAGI QORA RO'YXATDAN HAM OLIB TASHLANADI: aks
+         * holda `inspectUrl` da oq ro'yxat ustun bo'lsa ham,
+         * panelda host IKKI ro'yxatda turib, "qaysi biri
+         * ishlayapti" degan savol paydo bo'lardi.
+         *
+         * ⚠️ TASHQI RO'YXATDAN (`ThreatHost`) OLIB TASHLANMAYDI:
+         * u manbadan keladi va keyingi yangilanishda qaytib
+         * kelardi. Oq ro'yxat esa undan BARIBIR ustun
+         * (`inspectUrl` dagi tartib).
+         */
+        const blocked = settings.guardBlockedHosts.filter((item) => item !== host);
+
+        await this.prisma.settings.update({
+          where: { id: settings.id },
+          data: {
+            guardAllowedHosts: [...allowed].sort(),
+            guardBlockedHosts: blocked,
+          },
+        });
+      }
+    }
+
+    const updated = await this.prisma.securityEvent.update({
+      where: { id },
+      data: {
+        isFalsePositive: true,
+        reviewedBy: userId,
+        reviewedAt: new Date(),
+      },
+    });
+
+    await this.audit.record({
+      userId,
+      action: "security.false_positive",
+      entity: "SecurityEvent",
+      entityId: id,
+      meta: {
+        chatId: event.chatId,
+        kind: event.kind,
+        reason: event.reason,
+        url: event.url,
+        allowedHost,
+      },
+      ip,
+    });
+
+    return {
+      ok: true,
+      isFalsePositive: updated.isFalsePositive,
+      allowedHost,
+      /**
+       * ⚠️ XABAR QAYTARILMAGANI OCHIQ AYTILADI: xodim "tiklash"
+       * tugmasini bosib, xabar guruhga qaytadi deb o'ylardi.
+       */
+      note: allowedHost
+        ? `${allowedHost} oq ro'yxatga qo'shildi — bundan keyin o'chirilmaydi`
+        : "Hodisa noto'g'ri deb belgilandi",
+    };
+  }
+
+  /**
+   * ⚠️ HOST IKKI MANBADAN: `urlHost` to'ldirilmagan eski
+   * yozuvlarda u `url` dan qayta o'qiladi — aks holda eski
+   * hodisalar uchun tugma ishlamasdi.
+   */
+  private hostOf(urlHost: string | null, url: string | null): string | null {
+    const direct = urlHost?.trim().toLowerCase();
+    if (direct) return direct.replace(/^www\./, "");
+
+    if (!url) return null;
+
+    try {
+      const parsed = new URL(url.includes("://") ? url : `http://${url}`);
+      return parsed.hostname.toLowerCase().replace(/^www\./, "");
+    } catch {
+      return null;
+    }
+  }
+
   /** Panel sarlavhasidagi raqamlar. */
   async stats(scope: ScopeContext) {
     const where = signalScopeWhere(scope, { includeUnassigned: true });
 
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    const [total, deleted, failed, last24h, byKind, guardedGroups, totalGroups] =
-      await Promise.all([
+    const [
+      total,
+      deleted,
+      failed,
+      last24h,
+      byKind,
+      guardedGroups,
+      totalGroups,
+      blindGroups,
+      falsePositives,
+    ] = await Promise.all([
         this.prisma.securityEvent.count({ where }),
         this.prisma.securityEvent.count({ where: { ...where, action: "deleted" } }),
         // ⚠️ "O'CHIRILMADI" ALOHIDA SANALADI: bot admin bo'lmasa
@@ -257,6 +460,31 @@ export class SecurityService {
           where: { guardEnabled: true, status: { not: "left" } },
         }),
         this.prisma.telegramGroup.count({ where: { status: { not: "left" } } }),
+        /**
+         * ⚠️ "QALQON YOQILGAN, LEKIN BOT O'CHIRA OLMAYDI" —
+         * ALOHIDA SANOQ va u ENG MUHIM raqam. `guardEnabled` —
+         * ma'muriyat XOHISHI, `canDeleteMessages` — Telegram
+         * RUXSATI. Ikkisi ajralganda himoya yo'q, lekin panelda
+         * "yoqilgan" bo'lib ko'rinadi va bot guruhga ogohlantirish
+         * ham YOZMAYDI.
+         */
+        this.prisma.telegramGroup.count({
+          where: {
+            guardEnabled: true,
+            status: { not: "left" },
+            canDeleteMessages: false,
+          },
+        }),
+        /**
+         * ⚠️ NOTO'G'RI O'CHIRISHLAR SANOG'I — QOIDA SIFATINING
+         * YAGONA O'LCHOVI. U o'smayotgan bo'lsa qoida aniq
+         * ishlayapti; o'syotgan bo'lsa ro'yxatni ko'rib chiqish
+         * kerak. Usiz "oddiy havolalar ham bloklanyapti" degan
+         * shikoyatni raqam bilan tekshirib bo'lmasdi.
+         */
+        this.prisma.securityEvent.count({
+          where: { ...where, isFalsePositive: true },
+        }),
       ]);
 
     return {
@@ -269,6 +497,10 @@ export class SecurityService {
       ),
       guardedGroups,
       totalGroups,
+      /** Qalqon yoqilgan, lekin botda o'chirish huquqi yo'q guruhlar. */
+      blindGroups,
+      /** Xodim "noto'g'ri o'chirildi" deb belgilagan hodisalar. */
+      falsePositives,
     };
   }
 
@@ -350,6 +582,7 @@ export class SecurityService {
   ) {
     const where = groupListWhere(scope, {
       isOfficial: dto.filterIsOfficial,
+      districtId: dto.filterDistrictId,
       mahallaId: dto.filterMahallaId,
       unassigned: dto.filterUnassigned,
       search: dto.filterSearch,
@@ -404,6 +637,7 @@ export class SecurityService {
         chatIds,
         filter: {
           isOfficial: dto.filterIsOfficial,
+          districtId: dto.filterDistrictId,
           mahallaId: dto.filterMahallaId,
           unassigned: dto.filterUnassigned,
           search: dto.filterSearch,

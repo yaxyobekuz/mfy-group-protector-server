@@ -31,11 +31,15 @@ import {
   DELETED_CITIZEN_NAME,
   activeCitizenWhere,
 } from "../../common/citizen-deleted";
+import { normalizePhone } from "../../common/phone";
 import { POINTS } from "../../common/points";
 import { SECRET_CONTEXT, openSecret } from "../../common/secret-box";
 import { signRef, verifyRef } from "../../common/signed-ref";
+import { AppealTriageService } from "../issues/appeal-triage.service";
+import { AssignmentRulesService } from "../issues/assignment-rules.service";
 import { IssuesService } from "../issues/issues.service";
 import { UploadsService } from "../uploads/uploads.service";
+import { URGENCY_HOURS, URGENCY_LABELS } from "./ai/mobile-ai.constants";
 import { MobileAiService } from "./ai/mobile-ai.service";
 import { AppleTokenService } from "./apple-token.service";
 import type {
@@ -53,6 +57,19 @@ interface SignedAi {
   confidence: number;
   priority: string;
   model: string;
+  /**
+   * ── MUDDAT TAVSIYASI ─────────────────────────────────
+   *
+   * ⚠️ IMZO ICHIDA, chunki u PANELDA DALIL sifatida ko'rsatiladi
+   * ("AI matnni shoshilinch deb baholadi — 24 soat"). Mijoz aytgan
+   * qiymatga ishonilsa, istalgan odam o'z murojaatiga "favqulodda"
+   * yorlig'ini yopishtira olardi.
+   *
+   * ⚠️ IXTIYORIY: eski murojaatlarda bu maydonlar YO'Q va ular
+   * baribir o'qilishi kerak.
+   */
+  urgency?: string;
+  dueHours?: number;
 }
 
 /** Fuqaroga ko'rinadigan holat bosqichlari (ro'yxat tartibida). */
@@ -70,6 +87,8 @@ export class MobileService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly issues: IssuesService,
+    private readonly rules: AssignmentRulesService,
+    private readonly triage: AppealTriageService,
     private readonly uploads: UploadsService,
     private readonly ai: MobileAiService,
     private readonly appleTokens: AppleTokenService,
@@ -92,6 +111,17 @@ export class MobileService {
 
     const stats = await this.appealStats(citizenId);
 
+    /**
+     * ⚠️ TALAB PROFIL BILAN BIRGA QAYTADI: mijoz (bot, mini-ilova,
+     * mobil ilova) raqam so'rash kerakmi-yo'qmi degan savolga
+     * ALOHIDA so'rovsiz javob olishi kerak — aks holda har oqim
+     * boshida ikkita HTTP so'rov ketardi.
+     *
+     * ⚠️ QIYMAT SERVERDAN KELADI, mijozda QOTIB QOLMAYDI: sozlama
+     * panelda o'zgarsa, ilovani yangilash kerak bo'lmasligi kerak.
+     */
+    const requirePhone = await this.phoneRequired();
+
     return {
       id: citizen.id,
       telegramId: citizen.telegramId,
@@ -108,7 +138,25 @@ export class MobileService {
       points: citizen.points,
       createdAt: citizen.createdAt,
       stats,
+      requirePhone,
+      /** ⚠️ Mijoz uchun TAYYOR javob: "hozir raqam so'rash kerakmi". */
+      phoneNeeded: requirePhone && !citizen.phone,
     };
+  }
+
+  /**
+   * TELEFON MAJBURIYMI — `Settings.requirePhone`.
+   *
+   * ⚠️ SOZLAMA YO'Q BO'LSA `true`: yozuv hali yaratilmagan bo'lishi
+   * mumkin (yangi baza) va o'shanda "majburiy emas" deb qaror qilish
+   * himoyani JIMGINA o'chirib qo'yardi.
+   */
+  private async phoneRequired(): Promise<boolean> {
+    const settings = await this.prisma.settings.findUnique({
+      where: { id: "singleton" },
+      select: { requirePhone: true },
+    });
+    return settings?.requirePhone ?? true;
   }
 
   /**
@@ -310,10 +358,48 @@ export class MobileService {
       }
     }
 
+    /**
+     * ── TELEFON ───────────────────────────────────────────────────
+     *
+     * ⚠️ `undefined` VA `""` — IKKI BOSHQA NARSA va ularni
+     * aralashtirish JIM YO'QOTISHGA olib kelgan: botdagi "Profil"
+     * tugmasi `updateProfile(citizen, {})` ni chaqiradi (profilni
+     * o'qish uchun) va eski kod o'shanda `phone: null` yozib,
+     * fuqaro har profilga qaraganda raqamini O'CHIRIB yuborardi.
+     * Hech kim sezmasdi — raqam o'sha ekranda ko'rinmaydi ham.
+     *
+     * Endi: maydon BERILMAGAN bo'lsa — TEGILMAYDI.
+     */
+    let phone: string | null | undefined;
+
+    if (dto.phone !== undefined) {
+      const raw = dto.phone.trim();
+
+      if (!raw) {
+        // ⚠️ BO'SHATISH ATAYLAB QILINGAN AMAL — lekin telefon
+        // majburiy bo'lsa, u rad etiladi: aks holda fuqaro raqamni
+        // o'chirib, keyin murojaat yozolmay qolardi.
+        if (await this.phoneRequired()) {
+          throw new BadRequestException(
+            "Telefon raqami majburiy — uni bo'shatib bo'lmaydi",
+          );
+        }
+        phone = null;
+      } else {
+        const normalized = normalizePhone(raw);
+        if (!normalized) {
+          throw new BadRequestException(
+            "Telefon raqami noto'g'ri. Namuna: +998 90 123 45 67",
+          );
+        }
+        phone = normalized;
+      }
+    }
+
     await this.prisma.citizen.update({
       where: { id: citizenId },
       data: {
-        phone: dto.phone?.trim() || null,
+        ...(phone !== undefined ? { phone } : {}),
         ...(dto.districtId !== undefined
           ? { districtId: dto.districtId || null, mahallaId: dto.mahallaId || null }
           : {}),
@@ -331,6 +417,18 @@ export class MobileService {
   //  MA'LUMOTNOMALAR
   // ═══════════════════════════════════════════════════════════════
 
+  /**
+   * YO'NALISHLAR — IKKI DARAJALI, LEKIN TEKIS RO'YXAT.
+   *
+   * ⚠️ DARAXT SERVERDA QURILMAYDI: mijozlar uchta (bot, mini-ilova,
+   * mobil ilova) va har biri tanlovni O'ZICHA ko'rsatadi — bot ikki
+   * qadamli tugma bilan, ilova esa ochiladigan ro'yxat bilan. Tayyor
+   * daraxt qaytarilsa, tekis ro'yxat kerak bo'lgan joyda (hisobot
+   * filtri) uni qayta yoyish kerak bo'lardi.
+   *
+   * ⚠️ `parentId` — DARAXTNING YAGONA KALITI. Mijoz uni o'qib,
+   * "ASOSIY → Kichik" ko'rinishini o'zi quradi.
+   */
   async categories() {
     const rows = await this.prisma.issueCategory.findMany({
       where: { isActive: true },
@@ -343,9 +441,29 @@ export class MobileService {
         icon: true,
         slaHours: true,
         orgName: true,
+        parentId: true,
       },
     });
-    return rows;
+
+    /**
+     * ⚠️ BOLALARI BOR OTA "TANLAB BO'LMAYDIGAN" DEB BELGILANADI:
+     * fuqaro "Kommunal xizmatlar" ni tanlab qo'ysa, kichik
+     * yo'nalishga bo'linishning ma'nosi yo'qolardi — hisobotda yana
+     * bitta katta uyum paydo bo'lardi.
+     *
+     * ⚠️ O'CHIRILMAYDI, BELGILANADI: ota tanlov EKRANIDA kerak (u
+     * birinchi qadam), faqat YAKUNIY tanlov bo'la olmaydi.
+     */
+    const parents = new Set(
+      rows.map((row) => row.parentId).filter((id): id is string => Boolean(id)),
+    );
+
+    return rows.map((row) => ({
+      ...row,
+      hasChildren: parents.has(row.id),
+      /** ⚠️ Faqat shu qiymatlar murojaatda `categoryId` bo'la oladi. */
+      selectable: !parents.has(row.id),
+    }));
   }
 
   async territory() {
@@ -519,12 +637,34 @@ export class MobileService {
         icon: true,
         slaHours: true,
         orgName: true,
+        parentId: true,
+        parent: { select: { name: true } },
       },
     });
 
+    /**
+     * ⚠️ FAQAT ENG ANIQ YO'NALISHLAR MODELGA BERILADI: ichida
+     * kichik yo'nalishlari BOR asosiy yo'nalish ro'yxatdan
+     * CHIQARILADI. Aks holda model doim umumiy yo'nalishni tanlab,
+     * butun bo'linishning ma'nosi yo'qolardi — hamma murojaat yana
+     * "Kommunal xizmatlar"ga tushardi.
+     *
+     * ⚠️ BOLASI YO'Q ASOSIY YO'NALISH QOLADI ("Boshqa",
+     * "Xavfsizlik"): u o'zi ENG aniq yo'nalish.
+     */
+    const parentsWithChildren = new Set(
+      categories.map((c) => c.parentId).filter((id): id is string => Boolean(id)),
+    );
+    const leaves = categories.filter((c) => !parentsWithChildren.has(c.id));
+
     const suggestion = await this.ai.suggest(
       dto.body,
-      categories.map((c) => ({ id: c.id, name: c.name, description: c.description })),
+      leaves.map((c) => ({
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        parentName: c.parent?.name ?? null,
+      })),
     );
 
     if (!suggestion) {
@@ -538,11 +678,21 @@ export class MobileService {
     // ⚠️ IMZOLANADI: murojaat yaratishda mijoz shu tokenni qaytaradi va
     // server undan AI taklifini TIKLAYDI — foizni mijoz o'zgartira
     // olmaydi (soxta dalil bo'lardi).
+    /**
+     * ⚠️ DARAJA → SOAT AYLANTIRISH KODDA (`URGENCY_HOURS`), modelda
+     * EMAS. Modeldan raqam so'ralsa, u o'ylab topilgan son
+     * qaytarardi va o'sha son murojaatning muddati bo'lib qolardi
+     * (`mobile-ai.constants.ts` dagi batafsil izoh).
+     */
+    const dueHours = URGENCY_HOURS[suggestion.urgency] ?? category.slaHours;
+
     const signed: SignedAi = {
       categoryId: suggestion.categoryId,
       confidence: suggestion.confidence,
       priority: suggestion.priority,
       model: this.ai.model,
+      urgency: suggestion.urgency,
+      dueHours,
     };
 
     return {
@@ -550,10 +700,20 @@ export class MobileService {
         categoryId: category.id,
         categoryName: category.name,
         categoryIcon: category.icon,
+        /** ⚠️ Ilovada "Kommunal xizmatlar → Ichimlik suvi" deb ko'rsatiladi. */
+        parentName: category.parent?.name ?? null,
         confidence: suggestion.confidence,
         priority: suggestion.priority,
         slaHours: category.slaHours,
         orgName: category.orgName,
+        /**
+         * ⚠️ FUQAROGA KO'RSATILADI, LEKIN MUDDATNI BELGILAMAYDI:
+         * muddat yo'nalish SLA'si yoki MFY qoidasidan chiqadi.
+         * Bu — TAVSIYA va uni panelda XODIM qo'llaydi.
+         */
+        urgency: suggestion.urgency,
+        urgencyLabel: URGENCY_LABELS[suggestion.urgency] ?? suggestion.urgency,
+        suggestedDueHours: dueHours,
       },
       token: this.signAi(signed),
     };
@@ -566,21 +726,99 @@ export class MobileService {
   async create(citizen: { id: string }, dto: CreateAppealDto) {
     await this.enforceDailyLimit(citizen.id);
 
+    /**
+     * ── TELEFONSIZ MUROJAAT QABUL QILINMAYDI ──────────────────────
+     *
+     * ⚠️ SABAB AMALIY, RASMIYATCHILIK EMAS. Telefonsiz murojaatda
+     * xodim odamga BOG'LANA OLMAYDI: Telegram ismi "ALHAMDULILLAX
+     * 🙌🙌" bo'lishi mumkin, hudud esa "Belgilanmagan". Murojaat
+     * navbatda turadi-yu, hal qilib bo'lmaydi.
+     *
+     * ⚠️ TEKSHIRUV SHU YERDA — UCHALA YO'L UCHUN BIRDAN: bot,
+     * mini-ilova va mobil ilova HAMMASI shu metodni chaqiradi
+     * (`bot-citizens.controller.ts` izohi). Mijozda tekshirilsa,
+     * uchta joyda uchta nusxa bo'lardi va bittasi albatta
+     * eskirardi.
+     *
+     * ⚠️ XATO MATNI MIJOZGA YO'L KO'RSATADI: u fuqaroga shundayligicha
+     * ko'rsatiladi, ya'ni "400 Bad Request" emas, nima qilish
+     * kerakligi yozilgan gap bo'lishi kerak.
+     */
+    if (await this.phoneRequired()) {
+      const owner = await this.prisma.citizen.findUnique({
+        where: { id: citizen.id },
+        select: { phone: true },
+      });
+
+      if (!owner?.phone) {
+        throw new BadRequestException(
+          "Murojaat yuborish uchun telefon raqamingizni kiriting — xodim siz bilan shu raqam orqali bog'lanadi.",
+        );
+      }
+    }
+
     const category = await this.prisma.issueCategory.findUnique({
       where: { id: dto.categoryId },
-      select: { id: true, isActive: true, name: true, slaHours: true, orgName: true },
+      select: {
+        id: true,
+        isActive: true,
+        name: true,
+        slaHours: true,
+        orgName: true,
+        _count: { select: { children: true } },
+      },
     });
     if (!category) throw new NotFoundException("Yo'nalish topilmadi");
     if (!category.isActive) throw new BadRequestException("Yo'nalish faol emas");
 
-    // ── MFY hududi (nusxa) ──────────────────────────────────────────
+    /**
+     * ⚠️ FAQAT ENG ANIQ YO'NALISH QABUL QILINADI. Ichida kichik
+     * yo'nalishlari bor umumiy yo'nalish ("Kommunal xizmatlar")
+     * tanlansa, bo'linishning ma'nosi yo'qolardi — hisobotda yana
+     * bitta katta uyum paydo bo'lardi va "qaysi xizmat buzuq" degan
+     * savol javobsiz qolardi.
+     *
+     * ⚠️ TEKSHIRUV SERVERDA: mijozdagi ro'yxat (`selectable`)
+     * qulaylik, HAQIQIY chegara shu yerda — eski ilova versiyasi
+     * do'konda uzoq yashaydi.
+     */
+    if (category._count.children > 0) {
+      throw new BadRequestException(
+        "Aniqroq yo'nalishni tanlang — bu yo'nalish ichida kichik yo'nalishlar bor",
+      );
+    }
+
+    /**
+     * ── MFY HUDUDI (nusxa) ────────────────────────────────────────
+     *
+     * ⚠️ MIJOZ BERMASA — FUQARONING O'Z MFY SIDAN OLINADI. Bot
+     * murojaat oqimida hududni UMUMAN so'ramaydi (u profilda
+     * belgilanadi) va shu sababli botdan kelgan har murojaatda
+     * `Issue.mahallaId` BO'SH qolardi: panelda "Hudud:
+     * Belgilanmagan", tuman xodimi uni ko'rmaydi, ijrochi qoidasi
+     * ham ishlamaydi (u MFY bo'yicha qidiradi).
+     *
+     * ⚠️ ZAXIRA — "NUSXA" QOIDASIGA ZID EMAS: qiymat baribir
+     * YARATILISH paytida muhrlanadi. Fuqaro keyin hududini
+     * o'zgartirsa, eski murojaat eski MFY da qoladi — hisobot
+     * o'zgarmasligi uchun aynan shunday bo'lishi kerak.
+     */
     let mahallaId = dto.mahallaId ?? null;
+
     if (mahallaId) {
       const mahalla = await this.prisma.mahalla.findUnique({
         where: { id: mahallaId },
         select: { id: true },
       });
       if (!mahalla) mahallaId = null; // noto'g'ri id — jim tashlanadi, murojaat yo'qolmaydi
+    }
+
+    if (!mahallaId) {
+      const owner = await this.prisma.citizen.findUnique({
+        where: { id: citizen.id },
+        select: { mahallaId: true },
+      });
+      mahallaId = owner?.mahallaId ?? null;
     }
 
     // ── Fayllar: imzolangan tokenlardan tiklanadi ───────────────────
@@ -613,6 +851,43 @@ export class MobileService {
     const publicNo = await this.issues.nextPublicNo(this.prisma);
     const title = this.deriveTitle(dto.body);
 
+    /**
+     * ── TRIAJ ────────────────────────────────────────────
+     *
+     * ⚠️ FAQAT BELGILAYDI, RAD ETMAYDI: murojaat baribir
+     * yaratiladi va fuqaro "qabul qilindi" javobini oladi. Qaror —
+     * xodimda (`appeal-triage.service.ts` izohi).
+     *
+     * ⚠️ FUQARO ISMI UZATILADI: haqiqiy holatda murojaat matni
+     * fuqaroning O'Z ISMI bo'lgan va buni faqat ism bilan
+     * solishtirib aniqlash mumkin.
+     */
+    const owner = await this.prisma.citizen.findUnique({
+      where: { id: citizen.id },
+      select: { firstName: true, lastName: true },
+    });
+
+    const triage = await this.triage.triage({
+      body: dto.body,
+      categoryId: category.id,
+      mahallaId,
+      citizenName: [owner?.firstName, owner?.lastName].filter(Boolean).join(" ") || null,
+      aiConfidence: ai?.confidence ?? null,
+    });
+
+    /**
+     * ── AVTOMATIK IJROCHI ───────────────────────────────────
+     *
+     * ⚠️ MFY BO'YICHA QIDIRILADI va u BO'SH BO'LISHI MUMKIN
+     * (botdan kelgan murojaatda fuqaro hududini ko'rsatmagan
+     * bo'lishi mumkin) — o'shanda murojaat avvalgidek navbatda
+     * qoladi. Avtomatik taqsimot QULAYLIK, oqimning sharti emas.
+     *
+     * ⚠️ QOIDA O'Z SLA'SINI BERSA, U YO'NALISHNIKIDAN USTUN
+     * (`assignment-rules.service.ts`).
+     */
+    const auto = await this.rules.fieldsFor(mahallaId, category.id, category.slaHours);
+
     const issue = await this.prisma.issue.create({
       data: {
         publicNo,
@@ -633,7 +908,26 @@ export class MobileService {
         isRepeatAppeal: Boolean(dto.isRepeatAppeal),
         occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : null,
         sourceMeta: sourceMeta as Prisma.InputJsonValue,
-        dueAt: new Date(Date.now() + category.slaHours * 60 * 60 * 1000),
+        dueAt: auto?.dueAt ?? new Date(Date.now() + category.slaHours * 60 * 60 * 1000),
+        /**
+         * ⚠️ MUDDAT QAYERDAN KELGANI YOZIB QO'YILADI. "Muddat
+         * qanday belgilanyapti?" — bu savolga javob panelda
+         * ko'rinishi kerak. Avval faqat sana turardi va xodim uni
+         * "tizim o'ylab topgan" deb qabul qilardi.
+         */
+        dueSource: auto ? "rule" : "category",
+        /**
+         * ⚠️ OMMAVIY HODISA: ayni MFY da, ayni yo'nalish bo'yicha
+         * 12 soat ichida ochiq murojaat bo'lsa, bu unga BOG'LANADI
+         * — lekin alohida yozuv bo'lib qoladi (fuqaro o'z
+         * murojaatini ko'rishi kerak).
+         */
+        duplicateOfId: triage.duplicateOfId,
+        isSuspicious: triage.isSuspicious,
+        suspicionReason: triage.suspicionReason,
+        // ⚠️ HOLAT `new` BO'LIB QOLADI: biriktirish avtomatik
+        // bo'lgani — ishni kimdir boshlagani EMAS.
+        ...(auto ? { assigneeId: auto.assigneeId } : {}),
         ...(attachmentRefs.length > 0
           ? {
               attachments: {
@@ -722,7 +1016,15 @@ export class MobileService {
       },
       orderBy: [{ isPinned: "desc" }, { publishedAt: "desc" }],
       take: Math.min(Math.max(1, limit), 50),
-      include: { district: { select: { name: true } } },
+      include: {
+        district: { select: { name: true } },
+        /**
+         * ⚠️ TARTIB BO'YICHA: xodim suratlarni ATAYLAB ketma-ket
+         * qo'yadi (avval umumiy ko'rinish, keyin tafsilot) va
+         * tartibsiz ko'rsatish e'lonning ma'nosini buzardi.
+         */
+        media: { orderBy: { sortOrder: "asc" } },
+      },
     });
 
     return rows.map((a) => ({
@@ -734,6 +1036,17 @@ export class MobileService {
       publishedAt: a.publishedAt,
       viewCount: a.viewCount,
       districtName: a.district?.name ?? null,
+      /**
+       * ⚠️ `coverUrl` O'Z JOYIDA QOLADI: muqova — ro'yxatdagi BITTA
+       * surat, media esa e'lon ICHIDAGI galereya. Eski ilovalar
+       * `media` ni bilmaydi va faqat muqovani ko'rsatadi — ya'ni
+       * do'kondagi eski nusxa buzilmaydi.
+       */
+      media: a.media.map((item) => ({
+        kind: item.kind,
+        url: item.path,
+        mimeType: item.mimeType,
+      })),
     }));
   }
 

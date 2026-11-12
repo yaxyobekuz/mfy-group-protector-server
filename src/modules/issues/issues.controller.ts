@@ -24,6 +24,7 @@ import {
   type RequestUser,
 } from "../../common/decorators";
 import type { ScopeContext } from "../../common/scope.util";
+import { AssignmentRulesService } from "./assignment-rules.service";
 import { CategoriesService } from "./categories.service";
 import { IssuesService } from "./issues.service";
 import {
@@ -31,10 +32,12 @@ import {
   AssignIssueDto,
   CreateCategoryDto,
   CreateIssueDto,
+  ListAssignmentRulesQuery,
   ListIssuesQuery,
   ResolveIssueDto,
-  UpdateCategoryDto,
+  SaveAssignmentRuleDto,
 } from "./dto/issues.dto";
+import { UpdateCategoryDto } from "./dto/issues.dto";
 
 const toScope = (user: RequestUser): ScopeContext => ({
   userId: user.id,
@@ -45,7 +48,10 @@ const toScope = (user: RequestUser): ScopeContext => ({
 
 @Controller("issues")
 export class IssuesController {
-  constructor(private readonly issues: IssuesService) {}
+  constructor(
+    private readonly issues: IssuesService,
+    private readonly rules: AssignmentRulesService,
+  ) {}
 
   @Get()
   @RequirePermissions("issues.view")
@@ -57,6 +63,43 @@ export class IssuesController {
   @RequirePermissions("issues.view")
   stats(@CurrentUser() user: RequestUser) {
     return this.issues.getStats(toScope(user));
+  }
+
+  // ── IJROCHI QOIDALARI ────────────────────────────────────────────
+  //
+  // ⚠️ `:id` DAN OLDIN TURADI. NestJS yo'llarni E'LON TARTIBIDA
+  // solishtiradi va pastda qo'yilsa, `/issues/assignment-rules`
+  // so'rovi `findOne("assignment-rules")` ga tushib, "Murojaat
+  // topilmadi" degan chalg'ituvchi 404 qaytarardi.
+
+  /**
+   * ⚠️ `issues.assign` RUXSATI: qoida — "oldindan belgilangan
+   * ijrochi" va u qo'lda biriktirish bilan AYNI huquq darajasida
+   * turishi kerak. Alohida ruxsat ochilsa, "biriktira oladi, lekin
+   * qoidani ko'ra olmaydi" degan tushunarsiz holat chiqardi.
+   */
+  @Get("assignment-rules")
+  @RequirePermissions("issues.assign")
+  listRules(
+    @CurrentUser() user: RequestUser,
+    @Query() query: ListAssignmentRulesQuery,
+  ) {
+    return this.rules.list(toScope(user), query);
+  }
+
+  @Post("assignment-rules")
+  @RequirePermissions("issues.assign")
+  saveRule(
+    @Body() dto: SaveAssignmentRuleDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.rules.save(dto, toScope(user));
+  }
+
+  @Delete("assignment-rules/:id")
+  @RequirePermissions("issues.assign")
+  removeRule(@Param("id") id: string, @CurrentUser() user: RequestUser) {
+    return this.rules.remove(id, toScope(user));
   }
 
   @Get(":id")

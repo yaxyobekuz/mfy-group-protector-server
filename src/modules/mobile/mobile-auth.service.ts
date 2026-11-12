@@ -472,6 +472,12 @@ export class MobileAuthService {
         // ⚠️ FAQAT YANGI TOKEN KELGANDA YOZILADI — yuqoridagi izoh.
         ...(sealedApple ? { appleRefreshToken: sealedApple } : {}),
         /**
+         * ⚠️ FAOLLIK BELGISI — PANELDAGI "OBUNACHILAR" SONI UCHUN.
+         * Kirish — kuniga bir martalik amal (token 30 kunlik), ya'ni
+         * botdagi kabi kun chegarasi kerak emas.
+         */
+        lastSeenAt: new Date(),
+        /**
          * ⚠️ O'CHIRILGAN HISOB QAYTA TIRILMAYDI. Nazariy jihatdan bu
          * yerga tushib bo'lmaydi (o'chirishda uchala kalit `null`
          * qilinadi, ya'ni `where` mos kelmaydi va `create` ketadi),
@@ -489,6 +495,7 @@ export class MobileAuthService {
         photoUrl: data.photoUrl,
         languageCode: data.languageCode,
         email: data.email ?? null,
+        lastSeenAt: new Date(),
       },
       include: { district: { select: { name: true } }, mahalla: { select: { name: true } } },
     });

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Query } from "@nestjs/common";
 
 import {
   CurrentUser,
@@ -9,7 +9,6 @@ import type { ScopeContext } from "../../common/scope.util";
 import { CitizensService } from "./citizens.service";
 import {
   BlockCitizenDto,
-  BroadcastDto,
   ListCitizensQuery,
   RatingQuery,
 } from "./dto/citizens.dto";
@@ -58,10 +57,14 @@ export class CitizensController {
     return this.citizens.setBlocked(id, dto, user.id);
   }
 
-  @Post("broadcast")
-  @HttpCode(200)
-  @RequirePermissions("citizens.manage")
-  broadcast(@Body() dto: BroadcastDto, @CurrentUser() user: RequestUser) {
-    return this.citizens.broadcast(dto, user.id);
-  }
+  /**
+   * ⚠️ `POST /citizens/broadcast` OLIB TASHLANDI — o'rnida
+   * `POST /broadcasts` (`modules/broadcasts/`). Eski endpoint faqat
+   * FUQAROLARGA va faqat MATN yubora olardi; yangisida tuman/MFY
+   * kesimi, MFY guruhlari va botdan uzatilgan xabar ham bor.
+   *
+   * ⚠️ RUXSAT HAM O'ZGARDI: `citizens.manage` emas,
+   * `broadcast.send`. Ikkisi boshqa-boshqa amal — bloklash fuqaroni
+   * yopadi, tarqatma esa minglab odamga xabar yuboradi.
+   */
 }

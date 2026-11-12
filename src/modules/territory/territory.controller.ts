@@ -22,6 +22,7 @@ import {
   ListDistrictQuery,
   ListMahallaQuery,
   UpdateDistrictDto,
+  ImportMahallaGeoDto,
   UpdateMahallaDto,
 } from "./dto/territory.dto";
 
@@ -79,6 +80,22 @@ export class TerritoryController {
   @RequirePermissions("territory.view")
   listMahallas(@CurrentUser() user: RequestUser, @Query() query: ListMahallaQuery) {
     return this.territory.listMahallas(toScope(user), query);
+  }
+
+  /**
+   * MFY CHEGARALARI (GeoJSON) — OMMAVIY IMPORT.
+   *
+   * ⚠️ `mahallas/:id` DAN OLDIN TURADI: NestJS yo'llarni E'LON
+   * TARTIBIDA solishtiradi va pastda qo'yilsa, `/territory/mahallas/geo`
+   * so'rovi `updateMahalla("geo")` ga tushib ketardi.
+   *
+   * ⚠️ `territory.manage` RUXSATI: chegara — hududiy kesimning
+   * asosi va noto'g'ri import butun xaritani buzadi.
+   */
+  @Post("mahallas/geo")
+  @RequirePermissions("territory.manage")
+  importGeo(@Body() dto: ImportMahallaGeoDto, @CurrentUser() user: RequestUser) {
+    return this.territory.importMahallaGeo(dto, toScope(user));
   }
 
   @Post("mahallas")

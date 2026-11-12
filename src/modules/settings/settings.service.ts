@@ -102,6 +102,7 @@ export class SettingsService {
         ...(dto.mobileMaxAttachments !== undefined
           ? { mobileMaxAttachments: dto.mobileMaxAttachments }
           : {}),
+        ...(dto.requirePhone !== undefined ? { requirePhone: dto.requirePhone } : {}),
         updatedBy: userId,
       },
     });

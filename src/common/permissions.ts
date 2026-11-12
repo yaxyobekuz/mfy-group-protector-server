@@ -131,6 +131,11 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         label: "Yangiliklarni boshqarish",
         hint: "Ilovadagi 'Yangiliklar' ro'yxatini tahrirlash va nashr etish.",
       },
+      {
+        key: "broadcast.send",
+        label: "Tarqatma yuborish",
+        hint: "Xabar fuqarolarning SHAXSIY chatiga va MFY guruhlariga PUSH bo'lib boradi. Yuborilganini qaytarib bo'lmaydi — shuning uchun operatorga BERILMAYDI. Shu huquqli xodim botda ham `/admin` panelini ochadi.",
+      },
     ],
   },
   {
@@ -188,6 +193,9 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     // ⚠️ `citizens.manage` OPERATORDA YO'Q (blok — qattiq chora).
     "citizens.view",
     "announcements.manage",
+    // ⚠️ `broadcast.send` OPERATORDA YO'Q: yuborilgan xabarni
+    // qaytarib bo'lmaydi va u minglab odamga PUSH bo'lib boradi —
+    // `citizens.manage` va `security.guard` bilan AYNI sabab.
   ],
   viewer: [
     "groups.view",

@@ -67,6 +67,20 @@ export class ReportThreatDto {
 
   @IsOptional() @IsString() @MaxLength(512) errorMessage?: string;
 
+  /**
+   * BOTDA O'CHIRISH HUQUQI BORMI — URINISHDAN KEYINGI XULOSA.
+   *
+   * ⚠️ `undefined` — "BILINMADI" va u `false` dan BOSHQA narsa:
+   * huquq so'rovining o'zi xato bergan holatni "huquq yo'q" deb
+   * yozish panelda YO'Q muammo haqida ogohlantirish chiqarardi.
+   *
+   * ⚠️ NIMA UCHUN SHU YERDA: `my_chat_member` hodisasi bot shu kod
+   * joylashtirilgandan KEYIN qo'shilgan guruhlarda ishlaydi. Eski
+   * guruhlarda huquq haqida birinchi xabar aynan o'chirish urinishi
+   * paytida keladi — ya'ni bu yagona manba.
+   */
+  @IsOptional() @IsBoolean() botCanDelete?: boolean;
+
   /** Telegram `message.date` — SONIYADA. */
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) sentAt?: number;
 }
@@ -97,6 +111,16 @@ export class ListSecurityQuery extends PaginationQuery {
   /** Yuboruvchi bo'yicha — "bu odam yana tashladimi". */
   @IsOptional() @IsString() @MaxLength(64) senderTgId?: string;
 
+  /**
+   * NOTO'G'RI O'CHIRISHLAR FILTRI.
+   *
+   * ⚠️ ALOHIDA KESIM: `true` — qoidaning XATOLARI (ularni ko'rib
+   * ro'yxatni tuzatish kerak), `false` — tasdiqlangan tahdidlar.
+   * Berilmasa — ikkisi birga, chunki kundalik ishda ro'yxat
+   * to'liq ko'rinishi kerak.
+   */
+  @IsOptional() @toBool() @IsBoolean() falsePositive?: boolean;
+
   @IsOptional() @IsString() from?: string;
   @IsOptional() @IsString() to?: string;
 }
@@ -125,9 +149,34 @@ export class BulkGuardDto {
   guardEnabled!: boolean;
 
   @IsOptional() @toBool() @IsBoolean() filterIsOfficial?: boolean;
+  /** ⚠️ Guruh ro'yxatidagi tuman filtri — `groups.dto.ts` izohi. */
+  @IsOptional() @IsString() filterDistrictId?: string;
   @IsOptional() @IsString() filterMahallaId?: string;
   @IsOptional() @toBool() @IsBoolean() filterUnassigned?: boolean;
   @IsOptional() @IsString() @MaxLength(120) filterSearch?: string;
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) expectedCount?: number;
+}
+
+/**
+ * TASHQI TAHDID RO'YXATINI YOQISH/O'CHIRISH.
+ *
+ * ⚠️ O'CHIRILGAN RO'YXAT YANGILANMAYDI, lekin HOSTLARI QOLADI —
+ * qayta yoqilganda qaytadan yuklab o'tirmaslik uchun. Botga esa
+ * faqat YOQILGAN ro'yxatlarning hostlari beriladi.
+ */
+export class SetFeedEnabledDto {
+  @IsBoolean() isEnabled!: boolean;
+}
+
+/**
+ * NOTO'G'RI O'CHIRISHNI TUZATISH — IZOH IXTIYORIY.
+ *
+ * ⚠️ TANA BO'SH BO'LISHI MUMKIN: tugma bitta bosish bilan
+ * ishlashi kerak. Izoh talab qilinsa, xodim oyna ochilishini
+ * ko'rib, "keyin qilaman" deb ketardi — va qoida tuzatilmay
+ * qolardi.
+ */
+export class AllowEventDto {
+  @IsOptional() @IsString() @MaxLength(500) note?: string;
 }

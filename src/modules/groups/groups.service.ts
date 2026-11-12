@@ -92,6 +92,16 @@ export class GroupsService {
 
     const present = PRESENT_STATUSES.has(dto.status);
 
+    /**
+     * ⚠️ OLDINGI HOLAT UPSERT DAN OLDIN O'QILADI: upsert dan keyin
+     * u allaqachon YANGISI bo'lib qoladi va "nima o'zgardi" degan
+     * savolga javob yo'qolardi.
+     */
+    const before = await this.prisma.telegramGroup.findUnique({
+      where: { chatId: dto.chatId },
+      select: { status: true, canDeleteMessages: true, title: true },
+    });
+
     // Telegram'dan kelgan maydonlar — HAR hodisada yangilanadi. Guruh
     // nomi o'zgarsa reyestrda eski nom turib qolsa, panelda butunlay
     // boshqa guruh belgilangandek ko'rinardi.
@@ -102,6 +112,12 @@ export class GroupsService {
       status: dto.status,
       canPostMessages: dto.canPostMessages ?? false,
       canInviteUsers: dto.canInviteUsers ?? false,
+      // ⚠️ QALQONNING HAQIQIY SHARTI: `guardEnabled` ma'muriyat
+      // xohishi, bu esa Telegram ruxsati. Ikkisi boshqa-boshqa.
+      canDeleteMessages: dto.canDeleteMessages ?? false,
+      ...(dto.memberCount !== undefined
+        ? { memberCount: dto.memberCount, memberCountAt: new Date() }
+        : {}),
       // Bot ichida bo'lsa `leftAt` TOZALANADI: qayta qo'shilgan guruh
       // "chiqib ketgan" bo'lib qolmasligi kerak.
       leftAt: present ? null : new Date(),
@@ -119,7 +135,104 @@ export class GroupsService {
       },
     });
 
+    await this.recordMembershipAudit(dto, before, present);
+
     return { chatId: group.chatId, status: group.status };
+  }
+
+  /**
+   * BOT GURUHGA QO'SHILGANI / CHIQARILGANI — AUDITGA.
+   *
+   * ── NIMA UCHUN KERAK ────────────────────────────────────────────
+   *
+   * ⚠️ BOT GURUHDAN CHIQARILGANI JIMGINA SODIR BO'LADI: Telegram
+   * hodisa yuboradi, reyestrda `status` o'zgaradi — va hammasi
+   * shu. Bot guruhga hech narsa YOZMAYDI (doktrina), panelda esa
+   * guruh shunchaki ro'yxatdan yo'qolib qoladi. Natijada o'sha
+   * mahalladan signal ham, xavfsizlik hodisasi ham kelmay
+   * qo'yadi — va "nega bu MFY da muammo yo'q" degan savolga
+   * "chunki bot u yerda yo'q" degan javobni hech kim topa
+   * olmasdi.
+   *
+   * ⚠️ AUDIT — append-only (doktrina): yozuv qoladi va "qachondan
+   * beri kuzatuvsiz" degan savolga ANIQ sana bilan javob beradi.
+   *
+   * ── FAQAT O'ZGARISH YOZILADI ────────────────────────────────────
+   *
+   * ⚠️ HAR HODISA YOZILMAYDI: Telegram `my_chat_member` ni guruh
+   * nomi o'zgarganda ham yuboradi va auditga bir xil yozuvlar
+   * uyumi tushardi — muhim hodisa esa ular orasida ko'rinmay
+   * ketardi.
+   *
+   * ⚠️ XATO YUTILADI: audit — DALIL, lekin uning yozilmagani
+   * reyestrni yangilashni to'xtatmasligi kerak. Aks holda bot
+   * guruhdan chiqarilgani umuman qayd etilmay qolardi.
+   */
+  private async recordMembershipAudit(
+    dto: MembershipDto,
+    before: { status: string; canDeleteMessages: boolean; title: string } | null,
+    present: boolean,
+  ): Promise<void> {
+    try {
+      const wasPresent = before ? PRESENT_STATUSES.has(before.status) : false;
+
+      /**
+       * ⚠️ BIRINCHI KO'RISH ALOHIDA HODISA: bot yangi guruhga
+       * qo'shildi. `before` yo'qligini "chiqarilgan" deb o'qish
+       * mumkin emas.
+       */
+      let action: string | null = null;
+
+      if (!before) {
+        action = present ? "group.bot_joined" : null;
+      } else if (wasPresent && !present) {
+        // ⚠️ ENG MUHIM HOLAT: kuzatuv va qalqon TO'XTADI.
+        action = "group.bot_removed";
+      } else if (!wasPresent && present) {
+        action = "group.bot_joined";
+      } else if (
+        present &&
+        before.canDeleteMessages !== (dto.canDeleteMessages ?? false)
+      ) {
+        /**
+         * ⚠️ O'CHIRISH HUQUQI YO'QOLGANI HAM YOZILADI: qalqon
+         * panelda "yoqilgan" bo'lib ko'rinadi, lekin bot hech
+         * narsa o'chira olmaydi — va u guruhga ogohlantirish
+         * YOZMAYDI, ya'ni buni hech kim sezmasdi
+         * (`GroupStats.guardBlind` bilan ayni sabab).
+         */
+        action = (dto.canDeleteMessages ?? false)
+          ? "group.bot_can_delete"
+          : "group.bot_cannot_delete";
+      }
+
+      if (!action) return;
+
+      await this.audit.record({
+        /**
+         * ⚠️ `userId` — `null`: bu amalni XODIM qilmagan. Uni
+         * biror xodimga yozib qo'yish auditni soxtalashtirardi
+         * ("kim chiqarib tashladi" degan savolga yolg'on javob).
+         */
+        userId: null,
+        action,
+        entity: "TelegramGroup",
+        entityId: dto.chatId,
+        meta: {
+          title: dto.title?.trim() || before?.title || dto.chatId,
+          type: dto.type,
+          from: before?.status ?? null,
+          to: dto.status,
+          canDeleteMessages: dto.canDeleteMessages ?? false,
+          /** Kim chiqarib tashlagani — Telegram bersa. */
+          actorTgId: dto.addedByTgId ?? null,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `A'zolik auditi yozilmadi (${dto.chatId}): ${(error as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -141,14 +254,31 @@ export class GroupsService {
 
     const title = dto.title?.trim() || dto.chatId;
 
+    /**
+     * ⚠️ A'ZOLAR SONI FAQAT KELGANDA YOZILADI. `undefined` ni
+     * "0 a'zo" deb yozish panelda "guruhda hech kim yo'q" degan
+     * noto'g'ri raqam chiqarardi — bot esa sonni 6 soatda bir marta
+     * o'qiydi, ya'ni aksariyat xabarda u BERILMAYDI.
+     */
+    const counted =
+      dto.memberCount !== undefined
+        ? { memberCount: dto.memberCount, memberCountAt: new Date() }
+        : {};
+
     const group = await this.prisma.telegramGroup.upsert({
       where: { chatId: dto.chatId },
-      update: { type: dto.type, title, username: dto.username?.trim() || null },
+      update: {
+        type: dto.type,
+        title,
+        username: dto.username?.trim() || null,
+        ...counted,
+      },
       create: {
         chatId: dto.chatId,
         type: dto.type,
         title,
         username: dto.username?.trim() || null,
+        ...counted,
       },
     });
 
@@ -251,6 +381,16 @@ export class GroupsService {
       // qilish, `isOfficial` — yozishmani o'qishga rozilik.
       guardEnabled: group.guardEnabled,
       guardAt: group.guardAt,
+      /**
+       * ⚠️ QALQONNING HAQIQIY SHARTI. `guardEnabled` — ma'muriyat
+       * XOHISHI, bu esa Telegram RUXSATI. Ikkisi ajralsa, qalqon
+       * "yoqilgan" bo'lib ko'rinib, amalda hech narsa o'chirmaydi —
+       * va bot ogohlantirish yozmagani uchun buni hech kim sezmaydi.
+       */
+      canDeleteMessages: group.canDeleteMessages,
+      /** ⚠️ `null` — "hali o'qilmagan", `0` dan BOSHQA narsa. */
+      memberCount: group.memberCount,
+      memberCountAt: group.memberCountAt,
       mahalla: group.mahalla,
       joinedAt: group.joinedAt,
       leftAt: group.leftAt,
@@ -348,6 +488,7 @@ export class GroupsService {
   async bulkSetOfficial(dto: BulkOfficialDto, scope: ScopeContext) {
     const where = groupListWhere(scope, {
       isOfficial: dto.filterIsOfficial,
+      districtId: dto.filterDistrictId,
       mahallaId: dto.filterMahallaId,
       unassigned: dto.filterUnassigned,
       search: dto.filterSearch,
@@ -415,6 +556,7 @@ export class GroupsService {
         skippedNoMahalla: skippedNoMahalla.map((g) => g.chatId),
         filter: {
           isOfficial: dto.filterIsOfficial,
+          districtId: dto.filterDistrictId,
           mahallaId: dto.filterMahallaId,
           unassigned: dto.filterUnassigned,
           search: dto.filterSearch,
@@ -531,7 +673,7 @@ export class GroupsService {
       includeUnassigned: isProvinceWide(scope),
     });
 
-    const [total, official, unassigned, pendingMessages, guarded] =
+    const [total, official, unassigned, pendingMessages, guarded, guardBlind, members] =
       await Promise.all([
         this.prisma.telegramGroup.count({ where: scopeWhere }),
         this.prisma.telegramGroup.count({ where: { ...scopeWhere, isOfficial: true } }),
@@ -542,8 +684,41 @@ export class GroupsService {
         this.prisma.telegramGroup.count({
           where: { ...scopeWhere, guardEnabled: true },
         }),
+        /**
+         * ⚠️ "QALQON YOQILGAN, LEKIN ISHLAMAYDI" — ALOHIDA SANOQ.
+         * Bu eng xavfli holat: ma'muriyat himoya bor deb o'ylaydi,
+         * bot esa o'chira olmaydi va ogohlantirish ham yozmaydi.
+         * Sanoqsiz uni faqat hodisalar jurnalidan, bittalab topish
+         * mumkin edi.
+         */
+        this.prisma.telegramGroup.count({
+          where: { ...scopeWhere, guardEnabled: true, canDeleteMessages: false },
+        }),
+        /**
+         * ⚠️ A'ZOLAR YIG'INDISI — "OBUNACHILAR" SONINING BIR
+         * YARMI (ikkinchisi — botdagi fuqarolar). Ikkisi ALOHIDA
+         * ko'rsatiladi: guruhdagi odam botga yozmagan bo'lishi
+         * mumkin va teskarisi ham — ularni qo'shish bir odamni ikki
+         * marta sanardi.
+         *
+         * ⚠️ FAQAT BOT ICHIDA TURGAN GURUHLAR: chiqarib
+         * yuborilgan guruhning a'zolari endi bizning
+         * auditoriyamiz emas.
+         */
+        this.prisma.telegramGroup.aggregate({
+          where: { ...scopeWhere, leftAt: null },
+          _sum: { memberCount: true },
+        }),
       ]);
 
-    return { total, official, unassigned, pendingMessages, guarded };
+    return {
+      total,
+      official,
+      unassigned,
+      pendingMessages,
+      guarded,
+      guardBlind,
+      members: members._sum.memberCount ?? 0,
+    };
   }
 }

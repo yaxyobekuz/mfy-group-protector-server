@@ -97,4 +97,13 @@ export class UpdateSettingsDto {
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10)
   mobileMaxAttachments?: number;
+
+  /**
+   * TELEFON RAQAMI MAJBURIYMI (murojaat yuborishda).
+   *
+   * ⚠️ O'CHIRISH — JIDDIY QADAM: telefonsiz murojaatda xodim odamga
+   * bog'lana olmaydi va murojaat navbatda turib qoladi. Shuning uchun
+   * standart qiymat `true` (`schema.prisma` izohi).
+   */
+  @IsOptional() @IsBoolean() requirePhone?: boolean;
 }

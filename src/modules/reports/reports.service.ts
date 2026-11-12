@@ -22,6 +22,7 @@ import { Injectable } from "@nestjs/common";
 
 import { PrismaService } from "../../prisma/prisma.service";
 import {
+  districtScopeWhere,
   isProvinceWide,
   mahallaScopeWhere,
   signalScopeWhere,
@@ -190,27 +191,248 @@ export class ReportsService {
         });
     }
 
-    return {
-      mahallas: items,
-      districts: [...districtMap.values()].sort((a, b) => b.count - a.count),
-    };
+    /**
+     * ── TUMAN AHOLISI — NISBIY KO'RSATKICH UCHUN ──────────────────
+     *
+     * ⚠️ "Ulug'norda 50 ta, Asakada 450 ta murojaat" degan raqam HECH
+     * NARSA aytmaydi — Asaka shunchaki kattaroq. "Har 1000 kishiga
+     * 20 ta va 18 ta" esa ikkisini SOLISHTIRIB bo'ladigan qiladi va
+     * ko'rsatkich ma'noga ega bo'ladi.
+     *
+     * ⚠️ IKKI MANBA: tumanning O'Z soni (aniqroq) yoki MFY lar
+     * yig'indisi (zaxira). MFY aholisi to'liq to'ldirilmagan bo'lsa,
+     * yig'indi tumanni sun'iy "kichik" ko'rsatib, nisbiy sonni
+     * osmonga ko'tarardi — shuning uchun to'g'ridan-to'g'ri qiymat
+     * USTUN turadi.
+     */
+    const districtIds = [...districtMap.keys()];
+
+    const [districtRows, mahallaSums] = districtIds.length
+      ? await Promise.all([
+          this.prisma.district.findMany({
+            where: { id: { in: districtIds } },
+            select: { id: true, population: true },
+          }),
+          this.prisma.mahalla.groupBy({
+            by: ["districtId"],
+            where: { districtId: { in: districtIds }, isArchived: false },
+            _sum: { population: true },
+          }),
+        ])
+      : [[], []];
+
+    const explicit = new Map(districtRows.map((row) => [row.id, row.population]));
+    const summed = new Map(
+      mahallaSums.map((row) => [row.districtId, row._sum.population]),
+    );
+
+    const districts = [...districtMap.values()]
+      .map((district) => {
+        const population = explicit.get(district.id) ?? summed.get(district.id) ?? null;
+
+        return {
+          ...district,
+          population,
+          /**
+           * ⚠️ Aholi ma'lumoti yo'q bo'lsa `null` — `0` EMAS: nol
+           * "bu yerda hech kim yashamaydi" degan ma'noni berardi va
+           * panel uni "0 murojaat" bilan adashtirardi.
+           */
+          per1000:
+            population && population > 0
+              ? Math.round((district.count / population) * 1000 * 10) / 10
+              : null,
+          /** Son qayerdan olingani — panel buni izoh qilib ko'rsatadi. */
+          populationSource: explicit.get(district.id)
+            ? ("district" as const)
+            : summed.get(district.id)
+              ? ("mahallas" as const)
+              : null,
+        };
+      })
+      .sort((a, b) => b.count - a.count);
+
+    return { mahallas: items, districts };
+  }
+
+  /**
+   * TIZIMLI (TAKRORLANUVCHI) MUAMMOLAR — MFY × YO'NALISH.
+   *
+   * ── NIMA UCHUN KERAK ───────────────────────────────────────────
+   *
+   * ⚠️ BITTA MUROJAAT — HODISA, O'NTASI — TIZIMLI MUAMMO. "Bobur MFY
+   * da ichimlik suvi bo'yicha oyiga 14 ta murojaat" degan satr
+   * quvurni almashtirish kerakligini aytadi; o'sha 14 ta murojaatni
+   * birma-bir yopish esa muammoni HECH QACHON hal qilmaydi.
+   *
+   * ⚠️ KICHIK YO'NALISH KESIMIDA: "Kommunal xizmatlar" degan uyum
+   * hech narsa bermasdi — aynan shuning uchun yo'nalishlar ikki
+   * darajali qilindi.
+   *
+   * ⚠️ TAKRORIYLAR (`duplicateOfId`) HAM SANALADI: ommaviy hodisada
+   * 20 ta yozuv bo'ladi va ularni chiqarib tashlash muammoning
+   * HAQIQIY ko'lamini yashirardi. Lekin ular ALOHIDA ham
+   * ko'rsatiladi — "14 ta hodisa" va "14 ta yozuv" boshqa-boshqa
+   * narsa.
+   */
+  async recurring(scope: ScopeContext, query: ReportQuery) {
+    const where = this.baseWhere(scope, query);
+
+    const rows = await this.prisma.issue.groupBy({
+      by: ["mahallaId", "categoryId"],
+      where: { ...where, mahallaId: { not: null } },
+      _count: { _all: true },
+      _min: { createdAt: true },
+      _max: { createdAt: true },
+    });
+
+    /**
+     * ⚠️ YAKKA MUROJAAT TIZIMLI MUAMMO EMAS: chegara qo'yilmasa
+     * ro'yxat butun jadvalning nusxasi bo'lib, hech narsa
+     * ko'rsatmasdi.
+     */
+    const MIN_COUNT = 3;
+    const candidates = rows.filter((row) => row._count._all >= MIN_COUNT);
+
+    if (candidates.length === 0) return { items: [] };
+
+    const mahallaIds = [
+      ...new Set(
+        candidates.map((row) => row.mahallaId).filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const categoryIds = [...new Set(candidates.map((row) => row.categoryId))];
+
+    const [mahallas, categories, duplicateRows] = await Promise.all([
+      this.prisma.mahalla.findMany({
+        where: { id: { in: mahallaIds } },
+        select: {
+          id: true,
+          name: true,
+          population: true,
+          district: { select: { id: true, name: true } },
+        },
+      }),
+      this.prisma.issueCategory.findMany({
+        where: { id: { in: categoryIds } },
+        select: {
+          id: true,
+          name: true,
+          color: true,
+          parent: { select: { id: true, name: true } },
+        },
+      }),
+      this.prisma.issue.groupBy({
+        by: ["mahallaId", "categoryId"],
+        where: {
+          ...where,
+          mahallaId: { in: mahallaIds },
+          duplicateOfId: { not: null },
+        },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const mahallaById = new Map(mahallas.map((item) => [item.id, item]));
+    const categoryById = new Map(categories.map((item) => [item.id, item]));
+    const duplicatesByKey = new Map(
+      duplicateRows.map((row) => [`${row.mahallaId}|${row.categoryId}`, row._count._all]),
+    );
+
+    const items = candidates
+      .map((row) => {
+        const mahalla = row.mahallaId ? mahallaById.get(row.mahallaId) : null;
+        const category = categoryById.get(row.categoryId);
+        const duplicates = duplicatesByKey.get(`${row.mahallaId}|${row.categoryId}`) ?? 0;
+
+        /**
+         * ⚠️ ORALIQ KUNLARDA: "14 ta murojaat 3 kunda" va "14 ta
+         * murojaat 6 oyda" BUTUNLAY boshqa narsa — birinchisi
+         * avariya, ikkinchisi eskirgan quvur. Oyiga nechta
+         * to'g'ri kelishi shundan hisoblanadi.
+         */
+        const first = row._min.createdAt?.getTime() ?? 0;
+        const last = row._max.createdAt?.getTime() ?? 0;
+        const spanDays = Math.max(1, Math.round((last - first) / 86_400_000));
+
+        return {
+          mahallaId: row.mahallaId,
+          mahallaName: mahalla?.name ?? "—",
+          district: mahalla?.district ?? null,
+          categoryId: row.categoryId,
+          categoryName: category?.name ?? "—",
+          parentName: category?.parent?.name ?? null,
+          color: category?.color ?? null,
+          total: row._count._all,
+          /** Ommaviy hodisadagi takroriy yozuvlar soni. */
+          duplicates,
+          /** Takroriylarni chiqarib tashlagandagi HODISALAR soni. */
+          incidents: row._count._all - duplicates,
+          firstAt: row._min.createdAt,
+          lastAt: row._max.createdAt,
+          spanDays,
+          /** Oyiga nechta murojaat — "tizimlilik" o'lchovi. */
+          perMonth: Math.round((row._count._all / spanDays) * 30 * 10) / 10,
+        };
+      })
+      .sort((a, b) => b.total - a.total);
+
+    return { items };
   }
 
   /** KATEGORIYA KESIMI — nima haqida ko'proq yozyapti. */
   async byCategory(scope: ScopeContext, query: ReportQuery) {
     const where = this.baseWhere(scope, query);
 
-    const rows = await this.prisma.issue.groupBy({
-      by: ["categoryId"],
-      where,
-      _count: { _all: true },
-    });
+    /**
+     * ⚠️ MUDDATI O'TGANLAR AYNI KESIMDA SANALADI va bu TIRIK
+     * sinovda topilgan bo'shliq edi: hisobot yordamchisiga
+     * "muddati o'tganlar qaysi yo'nalishda ko'p" deb savol
+     * berilganda, u "jadvalda bu kesim yo'q" deb javob berdi —
+     * to'g'ri qildi, lekin savol eng ko'p so'raladiganlardan
+     * biri.
+     *
+     * ⚠️ IKKINCHI `groupBy`, `where` GA SHART QO'SHISH EMAS:
+     * ikkisi BIR VAQTDA kerak ("jami" va "undan muddati
+     * o'tgani"). Bitta so'rovga shart qo'shilsa, jami son
+     * yo'qolardi.
+     */
+    const [rows, overdueRows] = await Promise.all([
+      this.prisma.issue.groupBy({
+        by: ["categoryId"],
+        where,
+        _count: { _all: true },
+      }),
+      this.prisma.issue.groupBy({
+        by: ["categoryId"],
+        // ⚠️ `overview` DAGI AYNI SHART: "muddati o'tgan" degani
+        // — muddat o'tgan VA hali yopilmagan. Yopilganini
+        // qo'shish "kech bo'lsa ham hal qilindi" ni muammo deb
+        // ko'rsatardi.
+        where: { ...where, dueAt: { lt: new Date() }, status: { notIn: CLOSED } },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const overdueById = new Map(
+      overdueRows.map((row) => [row.categoryId, row._count._all]),
+    );
 
     const categories = await this.prisma.issueCategory.findMany({
       where: { id: { in: rows.map((row) => row.categoryId) } },
       // ⚠️ `icon` HAM: boshqaruv paneli yo'nalishlarni belgisi
       // bilan ko'rsatadi (xarita va ilova bilan AYNI belgi).
-      select: { id: true, name: true, color: true, icon: true },
+      //
+      // ⚠️ `parent` HAM: yakka "Ichimlik suvi" kontekstsiz qolardi
+      // va uni "Tozalik" bilan adashtirish mumkin edi (AI
+      // promptidagi ayni sabab).
+      select: {
+        id: true,
+        name: true,
+        color: true,
+        icon: true,
+        parent: { select: { name: true } },
+      },
     });
     const byId = new Map(categories.map((category) => [category.id, category]));
 
@@ -218,9 +440,11 @@ export class ReportsService {
       .map((row) => ({
         categoryId: row.categoryId,
         name: byId.get(row.categoryId)?.name ?? "—",
+        parentName: byId.get(row.categoryId)?.parent?.name ?? null,
         color: byId.get(row.categoryId)?.color ?? null,
         icon: byId.get(row.categoryId)?.icon ?? null,
         count: row._count._all,
+        overdue: overdueById.get(row.categoryId) ?? 0,
       }))
       .sort((a, b) => b.count - a.count);
   }
@@ -397,11 +621,36 @@ export class ReportsService {
         }),
       ]);
 
-    const [blockedCitizens, activeCitizens] = await Promise.all([
-      this.prisma.citizen.count({ where: { isBlocked: true } }),
-      // "Faol" — kamida bitta murojaat yuborgan.
-      this.prisma.citizen.count({ where: { issues: { some: {} } } }),
-    ]);
+    /**
+     * ⚠️ "OBUNACHI" DEGAN BITTA SON YO'Q va bo'lishi ham mumkin
+     * emas — shuning uchun bu yerda UCHTA alohida sanoq:
+     *
+     *   total     — ro'yxatdan o'tganlar (botga ham, ilovaga ham)
+     *   telegram  — Telegram orqali XABAR YUBORSA BO'LADIGANLAR
+     *   recent    — oxirgi 30 kunda ishlatganlar
+     *
+     * ⚠️ `telegram` ≠ `total`: Google bilan kirgan fuqaroda
+     * `telegramId` YO'Q va unga tarqatma bormaydi
+     * (`broadcasts.service.ts` dagi filtr bilan ayni sabab).
+     *
+     * ⚠️ `recent` KERAK, CHUNKI `total` MA'NOSINI YO'QOTADI: botni
+     * bir marta ochib tashlab ketgan odam ro'yxatda abadiy qoladi va
+     * son yildan-yilga o'sib boradi.
+     */
+    const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [blockedCitizens, activeCitizens, telegramCitizens, recentCitizens] =
+      await Promise.all([
+        this.prisma.citizen.count({ where: { isBlocked: true } }),
+        // "Faol" — kamida bitta murojaat yuborgan.
+        this.prisma.citizen.count({ where: { issues: { some: {} } } }),
+        this.prisma.citizen.count({
+          where: { telegramId: { not: null }, isBlocked: false, deletedAt: null },
+        }),
+        this.prisma.citizen.count({
+          where: { lastSeenAt: { gte: since30d }, deletedAt: null },
+        }),
+      ]);
 
     const statusCounts: Record<string, number> = {
       new: 0,
@@ -450,6 +699,10 @@ export class ReportsService {
         total: citizenAgg._count._all,
         active: activeCitizens,
         blocked: blockedCitizens,
+        /** Telegram orqali xabar yuborsa bo'ladiganlar — yuqoridagi izoh. */
+        telegram: telegramCitizens,
+        /** Oxirgi 30 kunda botni yoki ilovani ishlatganlar. */
+        recent: recentCitizens,
       },
       categories: byCategory
         .map((row) => ({
@@ -479,6 +732,147 @@ export class ReportsService {
    * ⚠️ CHEGARA BOR (2000): butun jadvalni xaritaga tortish brauzerni
    * yiqitardi. Eng yangilari olinadi.
    */
+  /**
+   * MFY KESIMI — XARITADAGI ISSIQLIK VA POLIGONLAR UCHUN.
+   *
+   * ── NIMA UCHUN ALOHIDA SO'ROV ───────────────────────────
+   *
+   * ⚠️ NUQTALARDAN HISOBLAB BO'LMAYDI. Xaritadagi nuqtalar FAQAT
+   * koordinatasi bor murojaatlar (asosan ilovadan kelgani) va ular
+   * 2000 ta bilan cheklangan. "Qaysi MFY da muammo ko'p" degan
+   * savolga javob esa HAMMA murojaatni sanashni talab qiladi —
+   * koordinatasizlarini ham, chunki ular ham MFY ga biriktirilgan.
+   *
+   * ⚠️ YO'NALISH KESIMI SHU YERDA: "har yo'nalish bo'yicha MFY
+   * kesimida filtr" talabi uchun mijozga har MFY ning har yo'nalish
+   * bo'yicha soni kerak. Shuning uchun sanoq YO'NALISH BO'YICHA
+   * bo'lingan holda qaytadi va filtr mijozda, so'rovsiz ishlaydi.
+   *
+   * ⚠️ GEOMETRIYA IXTIYORIY: MFY chegaralari rasmiy manbadan
+   * keladi va hamma MFY uchun birdan topilmaydi. Chegara bo'lmasa
+   * xarita DOIRA chizadi (`lat`/`lng` bo'yicha), ya'ni savol
+   * baribir javobsiz qolmaydi.
+   */
+  async mahallaMap(scope: ScopeContext, query: ReportQuery) {
+    const where = this.baseWhere(scope, query);
+
+    const [mahallas, grouped] = await Promise.all([
+      this.prisma.mahalla.findMany({
+        where: { isArchived: false, ...districtScopeWhere(scope) },
+        orderBy: [{ districtId: "asc" }, { sortOrder: "asc" }],
+        select: {
+          id: true,
+          name: true,
+          lat: true,
+          lng: true,
+          geoJson: true,
+          district: { select: { id: true, name: true } },
+        },
+      }),
+      this.prisma.issue.groupBy({
+        by: ["mahallaId", "categoryId"],
+        where: {
+          ...where,
+          mahallaId: { not: null },
+          ...(query.status ? { status: query.status } : {}),
+        },
+        _count: { _all: true },
+      }),
+    ]);
+
+    /**
+     * ── MARKAZ ZAXIRASI ──────────────────────────────────
+     *
+     * ⚠️ MFY CHEGARALARI RASMIY MANBADAN KELADI va ular hali
+     * import qilinmagan bo'lishi mumkin. Markazsiz MFY xaritada
+     * UMUMAN ko'rinmasdi — ya'ni butun kesim bo'sh bo'lib qolardi
+     * va mijoz "ishlamayapti" deb o'ylardi.
+     *
+     * ⚠️ ZAXIRA — O'SHA MFY DAGI MUROJAATLARNING O'RTACHA
+     * KOORDINATASI. Bu TAXMINIY markaz va u chegaraning o'rnini
+     * bosmaydi, lekin "qaysi mahallada ko'p" savoliga BUGUN javob
+     * beradi. Chegara import qilingach, `Mahalla.lat`/`lng` ustun
+     * turadi.
+     *
+     * ⚠️ FAQAT MARKAZI YO'Q MFY LAR UCHUN so'raladi: hammasi
+     * uchun hisoblash ortiqcha ish bo'lardi.
+     */
+    const needCenter = mahallas
+      .filter((mahalla) => mahalla.lat === null || mahalla.lng === null)
+      .map((mahalla) => mahalla.id);
+
+    const derived = new Map<string, { lat: number; lng: number }>();
+
+    if (needCenter.length > 0) {
+      const centers = await this.prisma.issue.groupBy({
+        by: ["mahallaId"],
+        where: {
+          mahallaId: { in: needCenter },
+          lat: { not: null },
+          lng: { not: null },
+        },
+        _avg: { lat: true, lng: true },
+      });
+
+      for (const row of centers) {
+        if (!row.mahallaId || row._avg.lat === null || row._avg.lng === null) continue;
+        derived.set(row.mahallaId, { lat: row._avg.lat, lng: row._avg.lng });
+      }
+    }
+
+    /**
+     * ⚠️ YIG'INDI SERVERDA HISOBLANADI: panel yo'nalish bo'yicha
+     * filtrlaganda sonni qayta yig'adi, lekin "hammasi" holatidagi
+     * son ham kerak — uni har renderda qayta hisoblash ortiqcha ish.
+     */
+    const byMahalla = new Map<
+      string,
+      { total: number; byCategory: Record<string, number> }
+    >();
+
+    for (const row of grouped) {
+      if (!row.mahallaId) continue;
+
+      const entry = byMahalla.get(row.mahallaId) ?? { total: 0, byCategory: {} };
+      entry.total += row._count._all;
+      entry.byCategory[row.categoryId] =
+        (entry.byCategory[row.categoryId] ?? 0) + row._count._all;
+      byMahalla.set(row.mahallaId, entry);
+    }
+
+    return mahallas.map((mahalla) => {
+      const counts = byMahalla.get(mahalla.id);
+
+      const fallback = derived.get(mahalla.id);
+
+      return {
+        id: mahalla.id,
+        name: mahalla.name,
+        district: mahalla.district,
+        lat: mahalla.lat ?? fallback?.lat ?? null,
+        lng: mahalla.lng ?? fallback?.lng ?? null,
+        /**
+         * ⚠️ MARKAZ TAXMINIYMI — PANEL BUNI KO'RSATADI (uzuk
+         * chiziq): aniq chegara bilan taxminiy nuqtani bir xil
+         * ko'rsatish xaritaga ortiqcha ishonch berardi.
+         *
+         * ⚠️ CHEGARA BOR BO'LSA — TAXMINIY EMAS: xarita o'shanda
+         * POLIGONNI chizadi va markaz umuman ishlatilmaydi. Aks
+         * holda aniq chegarali MFY ham "taxminiy" deb
+         * belgilanardi — ya'ni yozuv yolg'on bo'lardi.
+         */
+        isApproximate:
+          mahalla.geoJson === null &&
+          mahalla.lat === null &&
+          fallback !== undefined,
+        /** GeoJSON `Polygon`/`MultiPolygon` geometriyasi yoki `null`. */
+        geoJson: mahalla.geoJson,
+        total: counts?.total ?? 0,
+        byCategory: counts?.byCategory ?? {},
+      };
+    });
+  }
+
   async mapPoints(scope: ScopeContext, query: ReportQuery) {
     const rows = await this.prisma.issue.findMany({
       where: {
@@ -773,6 +1167,16 @@ export class ReportsService {
       })),
       unassigned: toRow(unassigned),
     };
+  }
+
+  /**
+   * ⚠️ EKSPORT UCHUN AYNI FILTR: yuklab olingan fayl EKRANDAGI
+   * kesim bilan bir xil bo'lishi kerak. Nusxalansa, hisobotdagi son
+   * bilan fayldagi son ajralib ketardi — va qaysi biri to'g'ri
+   * ekanini bilib bo'lmasdi.
+   */
+  exportWhere(scope: ScopeContext, query: ReportQuery): Prisma.IssueWhereInput {
+    return this.baseWhere(scope, query);
   }
 
   private baseWhere(scope: ScopeContext, query: ReportQuery): Prisma.IssueWhereInput {

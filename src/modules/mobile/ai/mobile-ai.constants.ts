@@ -67,6 +67,29 @@ export const SYSTEM_PROMPT = [
   "  zo'rg'a taxmin qilsangiz 20-40.",
   '- `0` YOZMA — u "umuman mos emas" degani.',
   "- `priority` — `low`, `normal`, `high` yoki `urgent` dan biri. Hayot/xavfsizlikka tahdid bo'lsa `urgent`.",
+  // ⚠️ IKKI DARAJALI RO'YXAT: har yo'nalish ichida kichik
+  // yo'nalishlar bor ("Kommunal xizmatlar → Ichimlik suvi") va
+  // ro'yxatda ular "ASOSIY → Kichik" ko'rinishida beriladi. Model
+  // ENG ANIQ yo'nalishni tanlamasa, butun bo'linishning ma'nosi
+  // yo'qolardi — hamma murojaat yana "Kommunal xizmatlar"ga
+  // tushardi.
+  "- Ro'yxatda `ASOSIY → Kichik` ko'rinishidagi yozuvlar bor. ENG ANIQ",
+  "  mos keladiganini tanlang: kichik yo'nalish mos kelsa, uning id'sini",
+  "  bering, asosiysining id'sini EMAS.",
+  "- Faqat hech bir kichik yo'nalish mos kelmasa, asosiy yo'nalishni tanlang.",
+  // ⚠️ SHOSHILINCHLIK — KATEGORIYA, SOAT EMAS. Modeldan "necha
+  // soat" deb so'ralsa, u o'ylab topilgan raqam qaytarardi (shlyuzda
+  // `confidence: 0` tuzog'i bilan ayni xavf) va o'sha raqam
+  // murojaatning MUDDATI bo'lib qolardi. Daraja esa SANALGAN
+  // to'plam: uni soatga aylantirish KODDA, bitta jadval orqali.
+  "- `urgency` — murojaat matnidan kelib chiqqan shoshilinchlik DARAJASI:",
+  "  `emergency` — hayot yoki xavfsizlikka bevosita tahdid (gaz hidi,",
+  "    uzilgan elektr simi, qulash xavfi, suv bosishi);",
+  "  `urgent` — kundalik hayot to'xtagan (suv yo'q, isitish yo'q,",
+  "    kanalizatsiya toshgan, elektr uzilgan);",
+  "  `soon` — noqulaylik, lekin hayot davom etadi (chiroq yonmaydi,",
+  "    yo'lda o'ra, chiqindi olinmagan);",
+  "  `routine` — ariza, ma'lumot, taklif — shoshilinch emas.",
   "- Matn yozmang, izoh bermang, murojaat matnini qaytarmang.",
   // ⚠️ "PAST" ANIQ RAQAM BILAN: yuqoridagi "`0` yozma" qoidasi bilan
   // ziddiyat qolmasligi uchun. "Past" o'zi noaniq va model uni yana
@@ -75,7 +98,7 @@ export const SYSTEM_PROMPT = [
   "  20-40 oralig'idagi `confidence` bilan tanlang.",
   "",
   "Javobni FAQAT shu JSON shaklida qaytar (boshqa hech narsa yozma):",
-  '{"categoryId":"<id>","confidence":85,"priority":"normal"}',
+  '{"categoryId":"<id>","confidence":85,"priority":"normal","urgency":"soon"}',
 ].join("\n");
 
 /**
@@ -98,7 +121,54 @@ export const SUGGESTION_SCHEMA = {
     categoryId: { type: "string" },
     confidence: { type: "integer", minimum: 0, maximum: 100 },
     priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
+    /**
+     * ⚠️ `enum` SHU YERDA O'RINLI (`categoryId` dan farqli):
+     * darajalar SANALGAN va ular panelda o'zgarmaydi. Model erkin
+     * matn qaytarsa, sxema uni RAD ETADI — va bu to'g'ri, chunki
+     * "juda shoshilinch" kabi qiymatni soatga aylantirib
+     * bo'lmasdi.
+     */
+    urgency: {
+      type: "string",
+      enum: ["routine", "soon", "urgent", "emergency"],
+    },
   },
-  required: ["categoryId", "confidence", "priority"],
+  required: ["categoryId", "confidence", "priority", "urgency"],
   additionalProperties: false,
 } as const;
+
+/**
+ * SHOSHILINCHLIK DARAJASI → TAVSIYA ETILGAN MUDDAT (soat).
+ *
+ * ── NIMA UCHUN JADVAL, MODELNING RAQAMI EMAS ───────────────
+ *
+ * ⚠️ MODELDAN "NECHA SOAT" DEB SO'RALMAYDI. Shlyuzda tirik
+ * tekshirilgan tuzoq (`confidence: 0`) aynan shuni ko'rsatdi: sxema
+ * buzilmagan, qiymat esa ma'nosiz — va hech narsa rad etmaydi. "6
+ * soat" deb qaytarilgan raqam murojaatning MUDDATI bo'lib qolardi va
+ * uning qayerdan kelgani hech qayerda ko'rinmasdi.
+ *
+ * ⚠️ JADVAL KODDA, SOZLAMADA EMAS: "gaz hidi — 4 soat" degan
+ * qaror tashkiliy va u o'zgarganda kod bilan birga ko'rib chiqilishi
+ * kerak. Sozlamaga chiqarilsa, kimdir uni tasodifan 720 soatga
+ * qo'yib, barcha shoshilinch murojaatlar jimgina sekinlashardi.
+ *
+ * ⚠️ BU QIYMAT MUDDATNI O'ZI QO'YMAYDI — TAVSIYA. Muddatni
+ * yo'nalish SLA'si yoki MFY qoidasi belgilaydi; AI tavsiyasi panelda
+ * ALOHIDA ko'rsatiladi va uni XODIM bir bosishda qo'llaydi
+ * (CLAUDE.md — "mobil AI: taklif, qaror emas").
+ */
+export const URGENCY_HOURS: Record<string, number> = {
+  emergency: 4,
+  urgent: 24,
+  soon: 72,
+  routine: 168,
+};
+
+/** Fuqaroga va panelga ko'rinadigan nom. */
+export const URGENCY_LABELS: Record<string, string> = {
+  emergency: "Favqulodda",
+  urgent: "Shoshilinch",
+  soon: "Tez orada",
+  routine: "Oddiy",
+};
