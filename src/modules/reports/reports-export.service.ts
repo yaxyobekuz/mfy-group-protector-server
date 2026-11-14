@@ -30,6 +30,7 @@ import type { ScopeContext } from "../../common/scope.util";
 import { formatDateTimeUz } from "../../common/date.util";
 import { PrismaService } from "../../prisma/prisma.service";
 import { ReportsService } from "./reports.service";
+import { ReportsCoverageService } from "./reports-coverage.service";
 import type { ReportQuery } from "./dto/reports.dto";
 
 /** Excel (Windows) uchun — fayl boshidagi BOM. */
@@ -66,6 +67,7 @@ export class ReportsExportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly reports: ReportsService,
+    private readonly coverageService: ReportsCoverageService,
   ) {}
 
   /**
@@ -87,6 +89,10 @@ export class ReportsExportService {
         return this.recurring(scope, query);
       case "issues":
         return this.issues(scope, query);
+      case "coverage":
+        return this.coverage(scope);
+      case "unassigned-groups":
+        return this.unassignedGroups();
       default:
         return this.overview(scope, query);
     }
@@ -288,6 +294,125 @@ export class ReportsExportService {
           "Takroriy",
           "Shubhali",
           "Matn",
+        ],
+        rows,
+      ),
+    };
+  }
+
+  // ════════════════════════════════════════════════════════════
+  //  QAMROV
+  // ════════════════════════════════════════════════════════════
+
+  /**
+   * TUMANLAR BO'YICHA QAMROV.
+   *
+   * ⚠️ FILTR OLINMAYDI (`ReportQuery` yo'q): qamrov — HOZIRGI
+   * holat, davr kesimi emas. "O'tgan oyda bot nechta MFY da bor
+   * edi" degan savol ma'nosiz: bugun nima qilish kerakligini
+   * bilish uchun bugungi holat kerak.
+   */
+  private async coverage(scope: ScopeContext): Promise<ExportResult> {
+    const data = await this.coverageService.coverage(scope);
+
+    const rows = data.districts.map((row) => [
+      row.districtName,
+      row.mahallaTotal,
+      row.covered,
+      row.notAttached,
+      row.notAdmin,
+      row.adminNoDelete,
+      row.coverageRate ?? "—",
+    ]);
+
+    /**
+     * ⚠️ JAMI QATOR CSV GA QO'SHILADI: rahbariyat faylni ochib,
+     * ustunni o'zi yig'ib o'tirmasligi kerak — va qo'lda
+     * yig'ilganda xato bo'lishi mumkin (arxivlangan MFY lar
+     * hisobga olinmaydi, buni faqat server biladi).
+     */
+    rows.push([
+      "JAMI",
+      data.totals.mahallaTotal,
+      data.totals.covered,
+      data.totals.notAttached,
+      data.totals.notAdmin,
+      data.totals.adminNoDelete,
+      data.totals.coverageRate ?? "—",
+    ]);
+
+    return {
+      filename: `hisobot-qamrov-${this.stamp()}.csv`,
+      csv: toCsv(
+        [
+          "Tuman",
+          "MFY jami",
+          "Bot bor",
+          "Bot yo'q",
+          "Admin emas",
+          "O'chirish huquqi yo'q",
+          "Qamrov (%)",
+        ],
+        rows,
+      ),
+    };
+  }
+
+  /**
+   * MFY BIRIKTIRILMAGAN GURUHLAR — ISHLASH UCHUN RO'YXAT.
+   *
+   * ⚠️ BU FAYL O'QISH UCHUN EMAS, ISHLASH UCHUN: xodim uni ochib,
+   * har guruhni qaysi MFY ga tegishliligini aniqlaydi va panelda
+   * biriktiradi. Shuning uchun `username` va a'zolar soni ham bor
+   * — "Mahalla", "Guruh", "Yoshlar" kabi nomlar o'nlab va yakka
+   * nom bo'yicha guruhni tanib bo'lmaydi.
+   *
+   * ⚠️ HAVOLA USTUNI ALOHIDA: `t.me/...` ni bosib, xodim guruhni
+   * DARHOL ochib ko'radi. Usiz u `username` ni qo'lda ko'chirib,
+   * brauzerga yozishi kerak bo'lardi — 50 ta guruh uchun bu
+   * yarim kunlik ish.
+   */
+  private async unassignedGroups(): Promise<ExportResult> {
+    const groups = await this.coverageService.unassignedGroups();
+
+    const rows = groups.map((group) => [
+      group.title,
+      group.type,
+      group.username ? `@${group.username}` : "—",
+      // ⚠️ HAVOLA FAQAT OMMAVIY GURUHDA bor: yopiq guruhda
+      // `username` yo'q va u faqat taklif havolasi bilan ochiladi
+      // (uni bot bermaydi).
+      group.username ? `https://t.me/${group.username}` : "—",
+      group.memberCount ?? "—",
+      group.status,
+      group.status === "administrator" ? "ha" : "",
+      group.canDeleteMessages ? "ha" : "",
+      group.isOfficial ? "ha" : "",
+      group.guardEnabled ? "ha" : "",
+      formatDateTimeUz(group.joinedAt),
+      // ⚠️ `chatId` OXIRGI USTUNDA: u uzun manfiy son va Excel
+      // uni ilmiy shaklga (`-1,00E+12`) aylantirib qo'yadi —
+      // boshida tursa, jadval o'qilmaydigan bo'lib ko'rinardi.
+      // Oxirida esa xodim uni e'tiborsiz qoldiradi.
+      group.chatId,
+    ]);
+
+    return {
+      filename: `hisobot-biriktirilmagan-guruhlar-${this.stamp()}.csv`,
+      csv: toCsv(
+        [
+          "Guruh nomi",
+          "Turi",
+          "Username",
+          "Havola",
+          "A'zolar",
+          "Bot holati",
+          "Admin",
+          "O'chirish huquqi",
+          "Kuzatuvda",
+          "Qalqon",
+          "Qo'shilgan",
+          "Chat ID",
         ],
         rows,
       ),

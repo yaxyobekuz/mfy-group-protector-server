@@ -10,6 +10,7 @@ import type { ScopeContext } from "../../common/scope.util";
 import { ReportsService } from "./reports.service";
 import { ReportsExportService } from "./reports-export.service";
 import { ReportsAiService } from "./reports-ai.service";
+import { ReportsCoverageService } from "./reports-coverage.service";
 import { AssistantBody, DailyQuery, ReportQuery } from "./dto/reports.dto";
 
 const toScope = (user: RequestUser): ScopeContext => ({
@@ -25,6 +26,7 @@ export class ReportsController {
     private readonly reports: ReportsService,
     private readonly exporter: ReportsExportService,
     private readonly assistant: ReportsAiService,
+    private readonly coverage: ReportsCoverageService,
   ) {}
 
   @Get("overview")
@@ -101,6 +103,28 @@ export class ReportsController {
    * xizmatlar — 400 ta" degan qator hech narsa aytmaydi, "Turon MFY,
    * Ichimlik suvi — 3 oyda 14 marta" esa ANIQ ish buyurtmasi.
    */
+  /**
+   * QAMROV — BOT QAYSI MFY LARGA KIRGAN.
+   *
+   * ⚠️ RUXSAT — `reports.view`: bu YIG'MA son va aynan
+   * rahbariyatga kerak ("qaysi tumanda qamrov past"). `groups.view`
+   * qo'yilsa, hisobot uchun kirgan rahbar eng muhim bo'shliqni
+   * ko'rmasdi — holbuki uni tuzatish buyrug'i o'shandan chiqadi.
+   *
+   * ⚠️ XOM RO'YXAT ESA `groups.view` BILAN (`export/unassigned-groups`):
+   * unda guruh nomlari va havolalari bor, ya'ni u reyestr ishi —
+   * hisobot emas.
+   *
+   * ⚠️ FILTR OLMAYDI: qamrov — HOZIRGI holat, davr kesimi
+   * emas. "O'tgan oyda bot nechta MFY da bor edi" degan savol
+   * ma'nosiz.
+   */
+  @Get("coverage")
+  @RequirePermissions("reports.view")
+  coverageReport(@CurrentUser() user: RequestUser) {
+    return this.coverage.coverage(toScope(user));
+  }
+
   @Get("recurring")
   @RequirePermissions("reports.view")
   recurring(@CurrentUser() user: RequestUser, @Query() query: ReportQuery) {
@@ -119,6 +143,39 @@ export class ReportsController {
    * yuklab olgan faylda BOSHQA tumanlar ham chiqib ketardi — va
    * ekranda hammasi joyidek ko'rinardi.
    */
+  /**
+   * MFY BIRIKTIRILMAGAN GURUHLAR RO'YXATI — CSV.
+   *
+   * ⚠️ BU MARSHRUT `export/:kind` DAN OLDIN TURISHI SHART.
+   * Ikkalasi ham ikki bo'lakli va Nest BIRINCHI mos kelganini
+   * oladi: pastda tursa, so'rov `kind = "unassigned-groups"` bo'lib
+   * UMUMIY handler'ga tushardi — va u `reports.view` bilan
+   * himoyalangan, ya'ni guruh nomlari va havolalari hisobot uchun
+   * kirgan odamga ham ochilib ketardi
+   * (`security.controller.ts#bulkSetGuard` dagi ayni tuzoq).
+   *
+   * ⚠️ RUXSAT — `groups.view`: ro'yxatda guruh nomlari,
+   * username va havolalar bor. Bu reyestr ishi — faylni ochgan
+   * odam har guruhni MFY ga biriktirishi kerak.
+   */
+  @Get("export/unassigned-groups")
+  @RequirePermissions("groups.view")
+  async exportUnassignedGroups(
+    @CurrentUser() user: RequestUser,
+    @Query() query: ReportQuery,
+    @Res() response: Response,
+  ): Promise<void> {
+    const { filename, csv } = await this.exporter.export(
+      "unassigned-groups",
+      toScope(user),
+      query,
+    );
+
+    response.setHeader("Content-Type", "text/csv; charset=utf-8");
+    response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    response.send(csv);
+  }
+
   @Get("export/:kind")
   @RequirePermissions("reports.view")
   async export(
