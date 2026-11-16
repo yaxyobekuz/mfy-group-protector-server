@@ -35,6 +35,7 @@
 import { Injectable } from "@nestjs/common";
 
 import type { ScopeContext } from "../../common/scope.util";
+import { chatTypeLabel, guardApplies } from "../../common/chat-type";
 import { formatDateTimeUz } from "../../common/date.util";
 import { buildXlsx, xlsxText } from "../../common/xlsx";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -326,6 +327,15 @@ export class ReportsExportService {
       row.mahallaTotal,
       row.covered,
       row.notAttached,
+      /**
+       * {W} "FAQAT KANAL" USTUNI QALQON USTUNLARIDAN OLDIN TURADI:
+       * u ikkisining MAXRAJINI tushuntiradi. Kanalda o'chiriladigan
+       * begona xabar yo'q (`common/chat-type.ts`), ya'ni o'sha MFY
+       * lar "admin emas" va "o'chirish huquqi yo'q" sonlariga
+       * UMUMAN kirmaydi — ustun bo'lmasa, sonlar qo'shilmay
+       * qolgani fayl ochgan odamga xato bo'lib ko'rinardi.
+       */
+      row.channelOnly,
       row.notAdmin,
       row.adminNoDelete,
       row.coverageRate ?? DASH,
@@ -342,6 +352,7 @@ export class ReportsExportService {
       data.totals.mahallaTotal,
       data.totals.covered,
       data.totals.notAttached,
+      data.totals.channelOnly,
       data.totals.notAdmin,
       data.totals.adminNoDelete,
       data.totals.coverageRate ?? DASH,
@@ -355,6 +366,7 @@ export class ReportsExportService {
         "MFY jami",
         "Bot bor",
         "Bot yo'q",
+        "Faqat kanal",
         "Admin emas",
         "O'chirish huquqi yo'q",
         "Qamrov (%)",
@@ -382,7 +394,11 @@ export class ReportsExportService {
 
     const rows = groups.map((group) => [
       group.title,
-      group.type,
+      // {W} XOM `supergroup` EMAS, O'QILADIGAN NOM
+      // (`common/chat-type.ts`): Telegram oddiy guruhni a'zo soni
+      // oshganda jimgina supergroup'ga aylantiradi va jadvalda
+      // ikki qiymat ikki boshqa narsadek ko'rinardi.
+      chatTypeLabel(group.type),
       group.username ? `@${group.username}` : DASH,
       // ⚠️ HAVOLA FAQAT OMMAVIY GURUHDA bor: yopiq guruhda
       // `username` yo'q va u faqat taklif havolasi bilan ochiladi
@@ -391,9 +407,17 @@ export class ReportsExportService {
       group.memberCount ?? DASH,
       group.status,
       group.status === "administrator" ? "ha" : "",
-      group.canDeleteMessages ? "ha" : "",
+      /**
+       * {W} KANAL QATORIDA QALQON USTUNLARI `—`: u yerda qalqon
+       * umuman ishga tushmaydi (`common/chat-type.ts`). "yo'q"
+       * (bo'sh hujayra) deb yozilsa, xodim uni TUZATILADIGAN
+       * bo'shliq deb o'qib, kanalga bekorga o'chirish huquqi
+       * so'rab yurardi — va huquq berilgandan keyin ham hech
+       * narsa o'zgarmasdi.
+       */
+      guardApplies(group.type) ? (group.canDeleteMessages ? "ha" : "") : DASH,
       group.isOfficial ? "ha" : "",
-      group.guardEnabled ? "ha" : "",
+      guardApplies(group.type) ? (group.guardEnabled ? "ha" : "") : DASH,
       formatDateTimeUz(group.joinedAt),
       // ⚠️ `chatId` OXIRGI USTUNDA VA MATN SIFATIDA: u uzun manfiy
       // son va son bo'lib yozilsa Excel uni ilmiy shaklga
@@ -403,10 +427,12 @@ export class ReportsExportService {
     ]);
 
     return this.sheet(
-      "biriktirilmagan-guruhlar",
-      "Biriktirilmagan guruhlar",
+      "biriktirilmagan-chatlar",
+      "Biriktirilmagan guruh va kanallar",
       [
-        "Guruh nomi",
+        // {W} "GURUH" EMAS, "CHAT": ro'yxatda kanal ham bor va
+        // sarlavha uni chetlab o'tgandek ko'rinardi.
+        "Nomi",
         "Turi",
         "Username",
         "Havola",

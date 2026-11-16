@@ -21,6 +21,7 @@
  * QILA OLMAYDI (`scope.util.ts` izohi).
  */
 
+import { CHANNEL_TYPE } from "./chat-type";
 import {
   isProvinceWide,
   mahallaScopeWhere,
@@ -40,6 +41,22 @@ export interface GroupListFilter {
   mahallaId?: string;
   unassigned?: boolean;
   search?: string;
+
+  /**
+   * CHAT TURI — `group` yoki `channel`.
+   *
+   * ⚠️ NIMA UCHUN FILTR KERAK: reyestrda guruh ham, kanal ham
+   * turadi, lekin ularga QILINADIGAN ISH boshqa. Qalqonni
+   * ommaviy yoqayotgan operator ro'yxatda kanallarni ko'rib,
+   * "nega ularga tegmadi" deb hayron bo'lardi — endi u
+   * ro'yxatning o'zini guruhlarga toraytiradi.
+   *
+   * ⚠️ `supergroup` ALOHIDA QIYMAT EMAS: Telegram oddiy guruhni
+   * a'zo soni oshganda jimgina supergroup'ga aylantiradi va
+   * operator uchun ikkisi BIR XIL narsa. Ikki qiymat berilsa,
+   * "Guruh" filtri o'sib ketgan guruhlarni yashirib qo'yardi.
+   */
+  chatType?: "group" | "channel";
 }
 
 /**
@@ -63,6 +80,11 @@ export const groupListWhere = (
     : {}),
   ...(filter.mahallaId ? { mahallaId: filter.mahallaId } : {}),
   ...(filter.unassigned ? { mahallaId: null } : {}),
+  ...(filter.chatType === "channel"
+    ? { type: CHANNEL_TYPE }
+    : filter.chatType === "group"
+      ? { type: { not: CHANNEL_TYPE } }
+      : {}),
   ...(filter.search
     ? {
         OR: [

@@ -154,6 +154,8 @@ export class BulkGuardDto {
   @IsOptional() @IsString() filterMahallaId?: string;
   @IsOptional() @toBool() @IsBoolean() filterUnassigned?: boolean;
   @IsOptional() @IsString() @MaxLength(120) filterSearch?: string;
+  /** ⚠️ Chat turi filtri — `groups.dto.ts#ListGroupsQuery` izohi. */
+  @IsOptional() @IsIn(["group", "channel"]) filterChatType?: "group" | "channel";
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) expectedCount?: number;
 }

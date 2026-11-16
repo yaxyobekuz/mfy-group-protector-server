@@ -1,6 +1,7 @@
 import { Transform, Type } from "class-transformer";
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -89,6 +90,15 @@ export class ListGroupsQuery extends PaginationQuery {
   @IsOptional() @IsString() mahallaId?: string;
   @IsOptional() @toBool() @IsBoolean() unassigned?: boolean;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
+
+  /**
+   * ⚠️ CHAT TURI FILTRI: reyestrda guruh ham, kanal ham turadi va
+   * ularga qilinadigan ish boshqa (kanalda qalqon yo'q —
+   * `common/chat-type.ts`). Operator ro'yxatni toraytirmasa,
+   * ommaviy amal unga tegishli bo'lmagan chatlarni ham qamrab
+   * olgandek ko'rinardi.
+   */
+  @IsOptional() @IsIn(["group", "channel"]) chatType?: "group" | "channel";
 }
 
 export class SetOfficialDto {
@@ -127,6 +137,8 @@ export class BulkOfficialDto {
   @IsOptional() @IsString() filterMahallaId?: string;
   @IsOptional() @toBool() @IsBoolean() filterUnassigned?: boolean;
   @IsOptional() @IsString() @MaxLength(120) filterSearch?: string;
+  /** ⚠️ Chat turi filtri — `groups.dto.ts#ListGroupsQuery` izohi. */
+  @IsOptional() @IsIn(["group", "channel"]) filterChatType?: "group" | "channel";
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) expectedCount?: number;
 }

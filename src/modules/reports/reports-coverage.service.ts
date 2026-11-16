@@ -29,11 +29,32 @@
  * yoshlar guruhi, ko'cha guruhi). Savol esa "mahalla qoplanganmi" —
  * ya'ni **kamida bittasida** bot bormi. Guruhlarni sanash
  * "10 guruhdan 4 tasida bot bor" degan ma'nosiz raqam berardi.
+ *
+ * ── KANAL QAMROVNI BERADI, QALQON USTUNLARINI BERMAYDI ────────────────
+ *
+ * ⚠️ KANAL — QOPLANGAN: postlar o'qiladi, AI tahlil qiladi, signal
+ * ham, muammo ham chiqadi. Ya'ni "bu mahalladan ma'lumot kelayaptimi"
+ * degan savolga javob — HA.
+ *
+ * ⚠️ LEKIN QALQON USTUNLARI (`notAdmin`, `adminNoDelete`) UNGA
+ * TEGISHLI EMAS (`common/chat-type.ts`): kanalda o'chiriladigan
+ * begona xabar yo'q. Agar kanal ham sanalsa, panelda "o'chirish
+ * huquqi yo'q — 42 MFY" degan qator turardi va ma'muriyat uni
+ * TUZATOLMASDI: Telegram kanalda ham huquq bersa, qalqon baribir
+ * ishga tushmaydi. Tuzatib bo'lmaydigan ogohlantirish haqiqiysini
+ * ko'rinmas qiladi.
+ *
+ * ⚠️ SHUNING UCHUN `channelOnly` — ALOHIDA USTUN: MFY qoplangan,
+ * lekin FAQAT kanal bilan. Qalqon ustunlari o'sha MFY ni hisobga
+ * olmaydi va jadvalda buning SABABI ko'rinadi — aks holda
+ * "qoplangan 50, admin emas 10, o'chirish yo'q 5" sonlari bir-biriga
+ * qo'shilmay qolgani tushunarsiz bo'lardi.
  */
 
 import { Injectable } from "@nestjs/common";
 
 import { PrismaService } from "../../prisma/prisma.service";
+import { guardApplies } from "../../common/chat-type";
 import {
   isProvinceWide,
   type ScopeContext,
@@ -91,6 +112,20 @@ export interface CoverageRow {
    */
   adminNoDelete: number;
 
+  /**
+   * QOPLANGAN, LEKIN FAQAT KANAL BILAN.
+   *
+   * ⚠️ `covered` NING BIR BO'LAGI, UNGA QO'SHIMCHA EMAS: bu MFY lar
+   * kuzatuvda (postlari o'qiladi, signal chiqadi), lekin qalqon
+   * ustunlari ularga tegishli emas — kanalda o'chiriladigan begona
+   * xabar yo'q (fayl boshidagi doktrina).
+   *
+   * ⚠️ USTUN KO'RSATILADI, YASHIRILMAYDI: usiz "qoplangan 50, admin
+   * emas 10, o'chirish yo'q 5" sonlari qo'shilmay qolgani
+   * tushunarsiz bo'lardi va xodim hisobotni buzuq deb o'ylardi.
+   */
+  channelOnly: number;
+
   /** Qoplanganlik ulushi (%) — `covered / mahallaTotal`. */
   coverageRate: number | null;
 }
@@ -112,6 +147,7 @@ export interface CoverageReport {
     notAttached: number;
     notAdmin: number;
     adminNoDelete: number;
+    channelOnly: number;
     coverageRate: number | null;
   };
 }
@@ -169,6 +205,9 @@ export class ReportsCoverageService {
         select: {
           mahallaId: true,
           status: true,
+          // ⚠️ `type` KERAK: qalqon ustunlari faqat guruhlarga
+          // tegishli (fayl boshidagi doktrina).
+          type: true,
           canDeleteMessages: true,
         },
       }),
@@ -182,10 +221,20 @@ export class ReportsCoverageService {
       }),
     ]);
 
-    /** MFY → uning guruhlaridagi eng YUQORI holat. */
+    /** MFY → uning chatlaridagi eng YUQORI holat. */
     const byMahalla = new Map<
       string,
-      { present: boolean; admin: boolean; canDelete: boolean }
+      {
+        present: boolean;
+        admin: boolean;
+        canDelete: boolean;
+        /**
+         * ⚠️ MFY DA QALQON TEGISHLI BO'LGAN CHAT BORMI (ya'ni
+         * kanal emas, guruh). Yo'q bo'lsa, `notAdmin` va
+         * `adminNoDelete` o'sha MFY ni UMUMAN sanamaydi.
+         */
+        guardable: boolean;
+      }
     >();
 
     for (const group of groups) {
@@ -193,6 +242,13 @@ export class ReportsCoverageService {
 
       const present = PRESENT_STATUSES.includes(group.status);
       const admin = group.status === ADMIN_STATUS;
+      /**
+       * ⚠️ FAQAT ICHIDA TURGAN GURUH HISOBGA OLINADI: chiqarib
+       * yuborilgan guruh "qalqon tegishli" deb sanalsa, MFY
+       * `channelOnly` dan chiqib ketib, tuzatib bo'lmaydigan
+       * "admin emas" qatoriga tushardi.
+       */
+      const guardable = present && guardApplies(group.type);
 
       const current = byMahalla.get(group.mahallaId);
 
@@ -201,11 +257,19 @@ export class ReportsCoverageService {
        * MFY da bir necha guruh bo'lsa va ulardan BITTASIDA bot
        * admin bo'lsa, mahalla himoyalangan hisoblanadi. Oxirgi
        * guruhga qarab xulosa chiqarish tasodifiy natija berardi.
+       *
+       * ⚠️ ADMIN HUQUQI FAQAT QALQON TEGISHLI CHATDAN OLINADI:
+       * kanalda bot admin bo'lsa ham qalqon ishga tushmaydi, ya'ni
+       * uni "himoyalangan" deb yozish panelda YO'Q himoyani
+       * ko'rsatardi.
        */
       byMahalla.set(group.mahallaId, {
         present: (current?.present ?? false) || present,
-        admin: (current?.admin ?? false) || admin,
-        canDelete: (current?.canDelete ?? false) || (admin && group.canDeleteMessages),
+        admin: (current?.admin ?? false) || (admin && guardable),
+        canDelete:
+          (current?.canDelete ?? false) ||
+          (guardable && admin && group.canDeleteMessages),
+        guardable: (current?.guardable ?? false) || guardable,
       });
     }
 
@@ -215,6 +279,7 @@ export class ReportsCoverageService {
       let covered = 0;
       let notAdmin = 0;
       let adminNoDelete = 0;
+      let channelOnly = 0;
 
       for (const mahalla of own) {
         const state = byMahalla.get(mahalla.id);
@@ -222,6 +287,18 @@ export class ReportsCoverageService {
         if (!state?.present) continue;
 
         covered += 1;
+
+        /**
+         * ⚠️ FAQAT KANAL BILAN QOPLANGAN MFY QALQON USTUNLARIDAN
+         * CHIQARILADI: kanalda o'chiriladigan begona xabar yo'q,
+         * ya'ni "admin emas" degan yorliq u yerda TUZATIB
+         * BO'LMAYDIGAN ogohlantirish bo'lardi (fayl boshidagi
+         * doktrina).
+         */
+        if (!state.guardable) {
+          channelOnly += 1;
+          continue;
+        }
 
         if (!state.admin) {
           notAdmin += 1;
@@ -239,6 +316,7 @@ export class ReportsCoverageService {
         notAttached: own.length - covered,
         notAdmin,
         adminNoDelete,
+        channelOnly,
         /**
          * ⚠️ MFY SI YO'Q TUMANDA `null`, `0` EMAS: nol "qamrov
          * yo'q" degan ma'noni berib, tuman eng yomon ko'rinardi —
@@ -257,6 +335,7 @@ export class ReportsCoverageService {
         notAttached: sum.notAttached + row.notAttached,
         notAdmin: sum.notAdmin + row.notAdmin,
         adminNoDelete: sum.adminNoDelete + row.adminNoDelete,
+        channelOnly: sum.channelOnly + row.channelOnly,
         coverageRate: null as number | null,
       }),
       {
@@ -265,6 +344,7 @@ export class ReportsCoverageService {
         notAttached: 0,
         notAdmin: 0,
         adminNoDelete: 0,
+        channelOnly: 0,
         coverageRate: null as number | null,
       },
     );

@@ -20,6 +20,28 @@
  * aholini himoya qiladi. Guruh "kuzatuvga yopiq" bo'lsa ham undagi
  * odamlarni virusdan himoya qilish mumkin va bu ikki qaror BIR-BIRIGA
  * BOG'LIQ EMAS.
+ *
+ * ── QALQON KANALGA TEGISHLI EMAS ─────────────────────────────────────
+ *
+ * ⚠️ KANALDA ZARARLI KONTENTNI O'SHA KANALNING O'Z ADMINI YOZADI.
+ * Guruhda qalqon BEGONA odamdan (firibgardan) aholini himoya qiladi;
+ * kanalda esa "himoya qilinadigan" va "tahdid soladigan" tomon bir
+ * xil bo'lib qoladi — ya'ni bot ma'muriyatning o'z e'lonini
+ * o'chirishga urinardi, raisning e'lonida havola bo'lishi esa ODATIY
+ * hol.
+ *
+ * ⚠️ UCH QAVAT TO'SIQ (`common/chat-type.ts`):
+ *
+ *   1. bot kanalda qalqonni UMUMAN ishga tushirmaydi
+ *   2. `guardConfig` kanal uchun `guardEnabled: false` qaytaradi
+ *   3. `setGuard` / `bulkSetGuard` kanalni RAD ETADI, `report` esa
+ *      kanal uchun hodisa YARATMAYDI
+ *
+ * Bittasi yetarli emas: botning eski nusxasi ishlayotgan bo'lsa (1)
+ * yo'q, server yiqilganda esa bot eski kesh bilan ishlaydi — ya'ni
+ * (2) ham jim o'tib ketardi. Panelda yoqilgan qalqon esa eng yomoni:
+ * u kanal qatorida "ishlamayapti" degan — tuzatib bo'lmaydigan —
+ * ogohlantirish bo'lib turardi.
  */
 
 import {
@@ -31,6 +53,12 @@ import {
 
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../../common/audit.service";
+import {
+  CHANNEL_TYPE,
+  guardApplies,
+  guardScopeWhere,
+  isChannel,
+} from "../../common/chat-type";
 import { groupListWhere } from "../../common/group-filter.util";
 import {
   canTouchDistrict,
@@ -72,16 +100,27 @@ export class SecurityService {
     const [group, settings] = await Promise.all([
       this.prisma.telegramGroup.findUnique({
         where: { chatId },
-        select: { guardEnabled: true },
+        // ⚠️ `type` HAM O'QILADI: kanalda qalqon ishga tushmaydi
+        // (fayl boshidagi doktrina) va javob shu yerda yopiladi.
+        select: { guardEnabled: true, type: true },
       }),
       this.prisma.settings.findUnique({ where: { id: "singleton" } }),
     ]);
 
     return {
-      // ⚠️ GURUH REYESTRDA YO'Q BO'LSA — QALQON O'CHIQ. Noma'lum
-      // guruhda xabar o'chirish mumkin emas: bot u yerga tasodifan
-      // qo'shilgan bo'lishi mumkin.
-      guardEnabled: Boolean(group?.guardEnabled),
+      /**
+       * ⚠️ GURUH REYESTRDA YO'Q BO'LSA — QALQON O'CHIQ. Noma'lum
+       * guruhda xabar o'chirish mumkin emas: bot u yerga tasodifan
+       * qo'shilgan bo'lishi mumkin.
+       *
+       * ⚠️ KANALDA HAM O'CHIQ, bazada `true` bo'lsa ham: qalqon
+       * kanalga tegishli emas (fayl boshidagi doktrina) va eski
+       * yoqilgan qiymat bazada qolib ketgan bo'lishi mumkin.
+       * Javobni shu yerda yopish — ikkinchi qavat to'siq, botdagi
+       * tekshiruv esa birinchisi.
+       */
+      guardEnabled:
+        Boolean(group?.guardEnabled) && guardApplies(group?.type),
       deleteFiles: settings?.guardDeleteFiles ?? true,
       deleteUrls: settings?.guardDeleteUrls ?? true,
       blockedHosts: settings?.guardBlockedHosts ?? [],
@@ -99,12 +138,27 @@ export class SecurityService {
   async report(dto: ReportThreatDto) {
     const group = await this.prisma.telegramGroup.findUnique({
       where: { chatId: dto.chatId },
-      select: { chatId: true },
+      select: { chatId: true, type: true },
     });
 
     // ⚠️ NOMA'LUM GURUH JIM TASHLANADI: reyestrda yo'q guruh uchun
     // yozuv yaratish begona chatni hisobotga olib kirardi.
     if (!group) return { skipped: true };
+
+    /**
+     * ⚠️ KANAL UCHUN HODISA YARATILMAYDI: `security_events` —
+     * APPEND-ONLY (doktrina), ya'ni bir marta yozilgan yozuvni
+     * keyin tozalab bo'lmaydi. Botning eski nusxasi kanal postini
+     * yuborib qolsa, u xavfsizlik hisobotini kanalga tegishli
+     * bo'lmagan — va hech kim hal qila olmaydigan — qatorlar bilan
+     * ABADIY to'ldirardi.
+     *
+     * ⚠️ `canDeleteMessages` HAM YOZILMAYDI (pastdagi blok shu
+     * `return` dan keyin turadi): kanalda bu huquqning bor-yo'qligi
+     * hech narsani o'zgartirmaydi va panelda yolg'on ogohlantirish
+     * chiqarardi.
+     */
+    if (!guardApplies(group.type)) return { skipped: true };
 
     const data = {
       chatId: dto.chatId,
@@ -439,6 +493,7 @@ export class SecurityService {
       totalGroups,
       blindGroups,
       falsePositives,
+      channels,
     ] = await Promise.all([
         this.prisma.securityEvent.count({ where }),
         this.prisma.securityEvent.count({ where: { ...where, action: "deleted" } }),
@@ -456,10 +511,19 @@ export class SecurityService {
           where,
           _count: { _all: true },
         }),
+        /**
+         * ⚠️ UCHALA SANOQCHI HAM KANALNI OLMAYDI
+         * (`guardScopeWhere`): "40/120 da qalqon yoqilgan" degan
+         * son maxraji kanallarni ham sanaganda hech qachon
+         * to'lmasdi — ma'muriyat esa qolgan 80 tasini yoqishga
+         * urinib yurardi.
+         */
         this.prisma.telegramGroup.count({
-          where: { guardEnabled: true, status: { not: "left" } },
+          where: { ...guardScopeWhere, guardEnabled: true, status: { not: "left" } },
         }),
-        this.prisma.telegramGroup.count({ where: { status: { not: "left" } } }),
+        this.prisma.telegramGroup.count({
+          where: { ...guardScopeWhere, status: { not: "left" } },
+        }),
         /**
          * ⚠️ "QALQON YOQILGAN, LEKIN BOT O'CHIRA OLMAYDI" —
          * ALOHIDA SANOQ va u ENG MUHIM raqam. `guardEnabled` —
@@ -470,6 +534,10 @@ export class SecurityService {
          */
         this.prisma.telegramGroup.count({
           where: {
+            // ⚠️ KANAL CHIQARIB TASHLANADI: u yerda qalqon
+            // baribir ishlamaydi va "o'chirish huquqi yo'q" degan
+            // ogohlantirishni tuzatib bo'lmasdi.
+            ...guardScopeWhere,
             guardEnabled: true,
             status: { not: "left" },
             canDeleteMessages: false,
@@ -484,6 +552,15 @@ export class SecurityService {
          */
         this.prisma.securityEvent.count({
           where: { ...where, isFalsePositive: true },
+        }),
+        /**
+         * ⚠️ KANALLAR SONI AYTILADI, JIM TASHLANMAYDI: yuqoridagi
+         * sanoqchilar ularni hisobga olmaydi va panelda "40/80"
+         * degan son ko'rinadi — holbuki reyestrda 120 chat bor.
+         * Son aytilmasa, xodim yo'qolgan 40 tasini izlab yurardi.
+         */
+        this.prisma.telegramGroup.count({
+          where: { type: CHANNEL_TYPE, status: { not: "left" } },
         }),
       ]);
 
@@ -501,6 +578,14 @@ export class SecurityService {
       blindGroups,
       /** Xodim "noto'g'ri o'chirildi" deb belgilagan hodisalar. */
       falsePositives,
+      /**
+       * KANALLAR — QALQON SANOQCHILARIDAN TASHQARIDA.
+       *
+       * ⚠️ `totalGroups` GA QO'SHILMAYDI: kanalda qalqon
+       * ishlamaydi, ya'ni u "himoyalanmagan guruh" emas —
+       * "himoya tegishli bo'lmagan chat".
+       */
+      channels,
     };
   }
 
@@ -523,6 +608,7 @@ export class SecurityService {
       select: {
         chatId: true,
         title: true,
+        type: true,
         guardEnabled: true,
         mahalla: { select: { districtId: true } },
       },
@@ -532,6 +618,25 @@ export class SecurityService {
 
     if (!canTouchDistrict(scope, group.mahalla?.districtId ?? null)) {
       throw new NotFoundException("Guruh topilmadi");
+    }
+
+    /**
+     * ⚠️ KANALDA QALQON YOQILMAYDI — SERVER RAD ETADI (fayl
+     * boshidagi doktrina). Panelda tugma ham ko'rinmaydi, lekin
+     * tekshiruv shu yerda ham KERAK: `PATCH` so'rovi id bilan
+     * keladi va panelni chetlab o'tib yuborilishi mumkin. Yoqilgan
+     * qiymat bazaga tushsa, kanal qatorida tuzatib bo'lmaydigan
+     * "qalqon ishlamayapti" ogohlantirishi paydo bo'lardi.
+     *
+     * ⚠️ O'CHIRISH ESA RAD ETILMAYDI: eski (kanal qoidasi
+     * kiritilishidan oldin) yoqilgan qiymatni tozalash yo'li
+     * ochiq qolishi kerak — aks holda bazadagi `true` ni hech kim
+     * olib tashlay olmasdi.
+     */
+    if (dto.guardEnabled && isChannel(group.type)) {
+      throw new BadRequestException(
+        "Kanalda xavfsizlik qalqoni ishlamaydi: postni kanalning o'z admini yozadi, ya'ni o'chiradigan begona xabar yo'q",
+      );
     }
 
     const updated = await this.prisma.telegramGroup.update({
@@ -586,11 +691,12 @@ export class SecurityService {
       mahallaId: dto.filterMahallaId,
       unassigned: dto.filterUnassigned,
       search: dto.filterSearch,
+      chatType: dto.filterChatType,
     });
 
     const candidates = await this.prisma.telegramGroup.findMany({
       where,
-      select: { chatId: true, guardEnabled: true },
+      select: { chatId: true, type: true, guardEnabled: true },
     });
 
     // ⚠️ RO'YXAT O'ZGARGAN BO'LSA RAD ETILADI: operator tasdiqlash
@@ -603,16 +709,41 @@ export class SecurityService {
       );
     }
 
+    /**
+     * ⚠️ KANALLAR O'TKAZIB YUBORILADI, AMAL TO'XTAMAYDI
+     * (`bulkSetOfficial` dagi "MFYsiz guruhlar" bilan AYNI qoida):
+     * filtrda bitta kanal turgani uchun qolgan 40 guruhga qalqon
+     * yoqmay qo'yish operatorni boshi berk ko'chaga olib borardi.
+     * Soni javobda QAYTARILADI — panel "3 kanal o'tkazib
+     * yuborildi" deb aytadi, ya'ni holat JIM qolmaydi.
+     *
+     * ⚠️ `expectedCount` TEKSHIRUVIDAN KEYIN: operator tasdiqlash
+     * oynasida ro'yxatdagi JAMI sonni ko'rgan va u shu bilan
+     * solishtiriladi. Kanallar oldin ayirilsa, har tasdiqlash
+     * "ro'yxat o'zgardi" xatosi bilan tugardi.
+     *
+     * ⚠️ O'CHIRISHDA KANAL CHIQARILMAYDI: eski yoqilgan qiymatni
+     * tozalash yo'li ochiq qolishi kerak (`setGuard` dagi ayni
+     * sabab).
+     */
+    const skippedChannels = dto.guardEnabled
+      ? candidates.filter((g) => !guardApplies(g.type))
+      : [];
+    const eligible = dto.guardEnabled
+      ? candidates.filter((g) => guardApplies(g.type))
+      : candidates;
+
     // ⚠️ HOLATI ALLAQACHON TO'G'RI BO'LGANLAR TEGILMAYDI:
     // `guardAt`/`guardBy` qayta yozilsa, qalqon QACHON va KIM
     // tomonidan yoqilgani yo'qolardi — bu xavfsizlik dalili.
-    const pending = candidates.filter((g) => g.guardEnabled !== dto.guardEnabled);
+    const pending = eligible.filter((g) => g.guardEnabled !== dto.guardEnabled);
     const chatIds = pending.map((g) => g.chatId);
 
     if (chatIds.length === 0) {
       return {
         changed: 0,
-        unchanged: candidates.length,
+        unchanged: eligible.length,
+        skippedChannels: skippedChannels.length,
         matched: candidates.length,
       };
     }
@@ -635,24 +766,32 @@ export class SecurityService {
       meta: {
         count,
         chatIds,
+        /** ⚠️ O'TKAZIB YUBORILGAN KANALLAR HAM DALIL. */
+        skippedChannels: skippedChannels.map((g) => g.chatId),
         filter: {
           isOfficial: dto.filterIsOfficial,
           districtId: dto.filterDistrictId,
           mahallaId: dto.filterMahallaId,
           unassigned: dto.filterUnassigned,
           search: dto.filterSearch,
+          chatType: dto.filterChatType,
         },
       },
       ip,
     });
 
     this.logger.log(
-      `[Security] ommaviy qalqon ${dto.guardEnabled ? "yoqildi" : "o'chirildi"}: ${count} guruh`,
+      `[Security] ommaviy qalqon ${dto.guardEnabled ? "yoqildi" : "o'chirildi"}: ${count} guruh` +
+        (skippedChannels.length > 0
+          ? `, ${skippedChannels.length} kanal o'tkazib yuborildi`
+          : ""),
     );
 
     return {
       changed: count,
-      unchanged: candidates.length - count,
+      unchanged: eligible.length - count,
+      /** ⚠️ KANALLAR SONI PANELDA AYTILADI — jim o'tkazilmaydi. */
+      skippedChannels: skippedChannels.length,
       matched: candidates.length,
     };
   }

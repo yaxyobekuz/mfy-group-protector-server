@@ -17,6 +17,20 @@
  * `getChats` faqat MTProto'da, ya'ni ODAM nomidan ulanishda. Bot faqat
  * O'ZIGA kelgan hodisadan biladi, shuning uchun ro'yxatni biz
  * to'playmiz.
+ *
+ * ── GURUH VA KANAL BITTA REYESTRDA, LEKIN AYNI EMAS ───────────────────
+ *
+ * ⚠️ IKKINCHI JADVAL OCHILMADI: kuzatuv oqimi (post → AI → signal →
+ * muammo) ikkisida ham AYNI va alohida jadval butun oqimni —
+ * `GroupMessage`, `GroupSignal`, qamrov, eksport — ikki nusxaga
+ * bo'lib yuborardi.
+ *
+ * ⚠️ FARQ FAQAT QALQONDA (`common/chat-type.ts`): kanalda zararli
+ * kontentni o'sha kanalning O'Z admini yozadi, ya'ni o'chirish
+ * ma'nosini yo'qotadi. Shuning uchun kanal uchun qalqon sanoqchilari
+ * (`guarded`, `guardBlind`) va "o'chirish huquqi yo'q" auditi
+ * ISHLAMAYDI — aks holda panelda hech qachon nolga tushmaydigan
+ * ogohlantirish turardi.
  */
 
 import {
@@ -28,6 +42,13 @@ import {
 
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../../common/audit.service";
+import {
+  CHANNEL_TYPE,
+  guardApplies,
+  guardScopeWhere,
+  isChannel,
+  WATCHED_CHAT_TYPES,
+} from "../../common/chat-type";
 import { groupListWhere } from "../../common/group-filter.util";
 import {
   canTouchDistrict,
@@ -45,15 +66,6 @@ import type {
   SetOfficialDto,
   TouchGroupDto,
 } from "./dto/groups.dto";
-
-/**
- * Reyestrga tushadigan chat turlari.
- *
- * ⚠️ `private` ATAYLAB YO'Q: shaxsiy chat — bu BOG'LANISH
- * (`User.telegramId`), guruh emas. Uni bu jadvalga yozish reyestrni
- * har bir foydalanuvchi bilan to'ldirib yuborardi.
- */
-const GROUP_TYPES = new Set(["group", "supergroup", "channel"]);
 
 /**
  * Bitta xabardan saqlanadigan eng uzun matn.
@@ -88,7 +100,7 @@ export class GroupsService {
    * manbasi.
    */
   async recordMembership(dto: MembershipDto) {
-    if (!GROUP_TYPES.has(dto.type)) return { skipped: true as const };
+    if (!WATCHED_CHAT_TYPES.has(dto.type)) return { skipped: true as const };
 
     const present = PRESENT_STATUSES.has(dto.status);
 
@@ -192,6 +204,15 @@ export class GroupsService {
         action = "group.bot_joined";
       } else if (
         present &&
+        /**
+         * ⚠️ KANALDA O'CHIRISH HUQUQI KUZATILMAYDI: qalqon u
+         * yerda umuman ishga tushmaydi (`common/chat-type.ts`),
+         * ya'ni "bot o'chira olmaydi" degan yozuv auditni
+         * tuzatib bo'lmaydigan ogohlantirish bilan
+         * to'ldirardi — va haqiqiy hodisalar ular orasida
+         * ko'rinmay ketardi.
+         */
+        guardApplies(dto.type) &&
         before.canDeleteMessages !== (dto.canDeleteMessages ?? false)
       ) {
         /**
@@ -250,7 +271,7 @@ export class GroupsService {
    * guruh har xabarda oddiy a'zoga tushib ketardi.
    */
   async touchFromMessage(dto: TouchGroupDto) {
-    if (!GROUP_TYPES.has(dto.type)) return { skipped: true as const };
+    if (!WATCHED_CHAT_TYPES.has(dto.type)) return { skipped: true as const };
 
     const title = dto.title?.trim() || dto.chatId;
 
@@ -368,6 +389,14 @@ export class GroupsService {
     const items = groups.map((group) => ({
       chatId: group.chatId,
       type: group.type,
+      /**
+       * ⚠️ TUR MATNI YONIDA ALOHIDA BAYROQ: panelda "kanalmi"
+       * degan savol o'nlab joyda so'raladi (qalqon tugmasi,
+       * ogohlantirish yorlig'i, ustunlar) va har joyda
+       * `type === "channel"` deb yozilsa, bittasi albatta
+       * unutilardi. Server bir marta hal qiladi.
+       */
+      isChannel: isChannel(group.type),
       title: group.title,
       username: group.username,
       status: group.status,
@@ -492,6 +521,7 @@ export class GroupsService {
       mahallaId: dto.filterMahallaId,
       unassigned: dto.filterUnassigned,
       search: dto.filterSearch,
+      chatType: dto.filterChatType,
     });
 
     const candidates = await this.prisma.telegramGroup.findMany({
@@ -560,6 +590,7 @@ export class GroupsService {
           mahallaId: dto.filterMahallaId,
           unassigned: dto.filterUnassigned,
           search: dto.filterSearch,
+          chatType: dto.filterChatType,
         },
       },
     });
@@ -673,16 +704,38 @@ export class GroupsService {
       includeUnassigned: isProvinceWide(scope),
     });
 
-    const [total, official, unassigned, pendingMessages, guarded, guardBlind, members] =
-      await Promise.all([
+    const [
+      total,
+      official,
+      channels,
+      unassigned,
+      pendingMessages,
+      guarded,
+      guardBlind,
+      members,
+    ] = await Promise.all([
         this.prisma.telegramGroup.count({ where: scopeWhere }),
         this.prisma.telegramGroup.count({ where: { ...scopeWhere, isOfficial: true } }),
+        /**
+         * ⚠️ KANALLAR ALOHIDA SANALADI, JAMIDAN AYIRILMAYDI:
+         * reyestr bitta va "jami 120 chat" degan son to'g'ri.
+         * Lekin qalqon sanoqchilari (`guarded`, `guardBlind`)
+         * faqat guruhlarni oladi, ya'ni ma'muriyat "120 dan 40
+         * tasida qalqon" degan sonni ko'rganda qolgani kanal
+         * ekanini bilishi kerak — aks holda hech qachon
+         * to'lmaydigan bo'shliq ko'rinardi.
+         */
+        this.prisma.telegramGroup.count({
+          where: { ...scopeWhere, type: CHANNEL_TYPE },
+        }),
         this.prisma.telegramGroup.count({ where: { ...scopeWhere, mahallaId: null } }),
         this.prisma.groupMessage.count({
           where: { analyzedAt: null, group: scopeWhere },
         }),
         this.prisma.telegramGroup.count({
-          where: { ...scopeWhere, guardEnabled: true },
+          // ⚠️ KANAL HISOBGA OLINMAYDI: qalqon u yerda ishga
+          // tushmaydi (`common/chat-type.ts`).
+          where: { ...scopeWhere, ...guardScopeWhere, guardEnabled: true },
         }),
         /**
          * ⚠️ "QALQON YOQILGAN, LEKIN ISHLAMAYDI" — ALOHIDA SANOQ.
@@ -692,7 +745,17 @@ export class GroupsService {
          * mumkin edi.
          */
         this.prisma.telegramGroup.count({
-          where: { ...scopeWhere, guardEnabled: true, canDeleteMessages: false },
+          where: {
+            ...scopeWhere,
+            // ⚠️ KANAL CHIQARIB TASHLANADI: kanalda bot o'chirish
+            // huquqini olmagan bo'lishi ODATIY hol va qalqon u
+            // yerda baribir ishlamaydi — bu qator kanalni ham
+            // sanaganda panelda tuzatib bo'lmaydigan qizil
+            // ogohlantirish abadiy turardi.
+            ...guardScopeWhere,
+            guardEnabled: true,
+            canDeleteMessages: false,
+          },
         }),
         /**
          * ⚠️ A'ZOLAR YIG'INDISI — "OBUNACHILAR" SONINING BIR
@@ -714,6 +777,8 @@ export class GroupsService {
     return {
       total,
       official,
+      /** Reyestrdagi kanallar — qalqon sanoqchilaridan tashqarida. */
+      channels,
       unassigned,
       pendingMessages,
       guarded,
