@@ -712,7 +712,8 @@ export class GroupsService {
       pendingMessages,
       guarded,
       guardBlind,
-      members,
+      groupMembers,
+      channelMembers,
     ] = await Promise.all([
         this.prisma.telegramGroup.count({ where: scopeWhere }),
         this.prisma.telegramGroup.count({ where: { ...scopeWhere, isOfficial: true } }),
@@ -758,18 +759,38 @@ export class GroupsService {
           },
         }),
         /**
-         * ⚠️ A'ZOLAR YIG'INDISI — "OBUNACHILAR" SONINING BIR
-         * YARMI (ikkinchisi — botdagi fuqarolar). Ikkisi ALOHIDA
-         * ko'rsatiladi: guruhdagi odam botga yozmagan bo'lishi
-         * mumkin va teskarisi ham — ularni qo'shish bir odamni ikki
-         * marta sanardi.
+         * GURUH A'ZOLARI — "OBUNACHILAR" SONINING BIR BO'LAGI
+         * (qolganlari: kanal obunachilari va botdagi fuqarolar).
          *
-         * ⚠️ FAQAT BOT ICHIDA TURGAN GURUHLAR: chiqarib
-         * yuborilgan guruhning a'zolari endi bizning
-         * auditoriyamiz emas.
+         * ⚠️ UCHALASI ALOHIDA KO'RSATILADI VA QO'SHILMAYDI:
+         * guruhdagi odam botga yozmagan bo'lishi mumkin, botga
+         * yozgan odam hech qaysi guruhda bo'lmasligi mumkin —
+         * ularni qo'shish bir odamni IKKI MARTA sanardi va bu son
+         * hisobotga chiqardi.
+         *
+         * ⚠️ FAQAT BOT ICHIDA TURGANLARI: chiqarib yuborilgan
+         * guruhning a'zolari endi bizning auditoriyamiz emas.
          */
         this.prisma.telegramGroup.aggregate({
-          where: { ...scopeWhere, leftAt: null },
+          where: { ...scopeWhere, ...guardScopeWhere, leftAt: null },
+          _sum: { memberCount: true },
+        }),
+        /**
+         * KANAL OBUNACHILARI — GURUH A'ZOLARIDAN ALOHIDA SON.
+         *
+         * ⚠️ QO'SHILMAYDI, CHUNKI BIR ODAM IKKALASIDA HAM BO'LADI:
+         * MFY ning guruhi ham, kanali ham bo'lsa, o'sha mahalla
+         * aholisi odatda ikkalasiga a'zo. Qo'shilsa, "auditoriya
+         * 2 400 kishi" degan son haqiqiydan ikki barobar katta
+         * chiqardi — va u tarqatma oldidagi "necha kishiga
+         * yuboriladi" sonini ham buzardi.
+         *
+         * ⚠️ SO'Z HAM BOSHQA: guruhda "a'zo", kanalda "obunachi".
+         * Bitta yorliq ostida ko'rsatilsa, xodim ularni bir xil
+         * narsa deb o'qirdi.
+         */
+        this.prisma.telegramGroup.aggregate({
+          where: { ...scopeWhere, type: CHANNEL_TYPE, leftAt: null },
           _sum: { memberCount: true },
         }),
       ]);
@@ -783,7 +804,9 @@ export class GroupsService {
       pendingMessages,
       guarded,
       guardBlind,
-      members: members._sum.memberCount ?? 0,
+      /** ⚠️ KANAL OBUNACHILARI BILAN QO'SHILMAYDI (yuqoridagi izoh). */
+      groupMembers: groupMembers._sum.memberCount ?? 0,
+      channelMembers: channelMembers._sum.memberCount ?? 0,
     };
   }
 }
