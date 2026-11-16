@@ -7,6 +7,7 @@ import {
   type RequestUser,
 } from "../../common/decorators";
 import type { ScopeContext } from "../../common/scope.util";
+import { XLSX_MIME } from "../../common/xlsx";
 import { ReportsService } from "./reports.service";
 import { ReportsExportService } from "./reports-export.service";
 import { ReportsAiService } from "./reports-ai.service";
@@ -132,7 +133,7 @@ export class ReportsController {
   }
 
   /**
-   * HISOBOTNI CSV QILIB YUKLAB OLISH.
+   * HISOBOTNI XLSX QILIB YUKLAB OLISH.
    *
    * ⚠️ KESIM YO'LDA (`:kind`), QUERY DA EMAS: brauzer faylni URL
    * oxiridagi nomdan taxmin qiladi va `?kind=issues` bo'lsa fayl
@@ -144,7 +145,7 @@ export class ReportsController {
    * ekranda hammasi joyidek ko'rinardi.
    */
   /**
-   * MFY BIRIKTIRILMAGAN GURUHLAR RO'YXATI — CSV.
+   * MFY BIRIKTIRILMAGAN GURUHLAR RO'YXATI — XLSX.
    *
    * ⚠️ BU MARSHRUT `export/:kind` DAN OLDIN TURISHI SHART.
    * Ikkalasi ham ikki bo'lakli va Nest BIRINCHI mos kelganini
@@ -165,15 +166,13 @@ export class ReportsController {
     @Query() query: ReportQuery,
     @Res() response: Response,
   ): Promise<void> {
-    const { filename, csv } = await this.exporter.export(
+    const { filename, file } = await this.exporter.export(
       "unassigned-groups",
       toScope(user),
       query,
     );
 
-    response.setHeader("Content-Type", "text/csv; charset=utf-8");
-    response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    response.send(csv);
+    this.sendFile(response, filename, file);
   }
 
   @Get("export/:kind")
@@ -184,20 +183,34 @@ export class ReportsController {
     @Query() query: ReportQuery,
     @Res() response: Response,
   ): Promise<void> {
-    const { filename, csv } = await this.exporter.export(kind, toScope(user), query);
+    const { filename, file } = await this.exporter.export(kind, toScope(user), query);
 
-    /**
-     * ⚠️ `charset=utf-8` MAJBURIY: usiz brauzer faylni mahalliy
-     * kodlashda saqlab, o'zbekcha matnni buzardi (BOM bilan birga
-     * ikki qatlamli himoya).
-     *
-     * ⚠️ `attachment` — fayl SAQLANADI, brauzerda ochilmaydi: CSV
-     * ni brauzer o'zi ko'rsatib qo'ysa, rahbariyat uni Excel'ga
-     * ko'chirib o'tirardi.
-     */
-    response.setHeader("Content-Type", "text/csv; charset=utf-8");
+    this.sendFile(response, filename, file);
+  }
+
+  /**
+   * TAYYOR FAYLNI JAVOBGA QO'YADI — IKKI MARSHRUT UCHUN BITTA JOY.
+   *
+   * ⚠️ `Content-Type` — XLSX NING O'ZI (`XLSX_MIME`), `text/csv`
+   * EMAS: noto'g'ri tur bilan Windows faylni Notepad'da ochishga
+   * urinardi va rahbariyat "fayl buzilgan" degan xulosaga kelardi.
+   *
+   * ⚠️ `charset` QO'SHILMAYDI: XLSX — IKKILIK fayl (ichida ZIP) va
+   * kodlash uning ichida yozilgan. Matn kodlashini e'lon qilish
+   * ba'zi proksi-serverlarni faylni "tuzatishga" undaydi — natijada
+   * baytlar buzilardi.
+   *
+   * ⚠️ `attachment` — fayl SAQLANADI, brauzerda ochilmaydi.
+   *
+   * ⚠️ `Content-Length` ATAYLAB QO'YILADI: brauzer yuklash
+   * jarayonini foiz bilan ko'rsatishi uchun (5000 qatorli
+   * murojaatlar fayli bir necha megabayt bo'lishi mumkin).
+   */
+  private sendFile(response: Response, filename: string, file: Buffer): void {
+    response.setHeader("Content-Type", XLSX_MIME);
     response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    response.send(csv);
+    response.setHeader("Content-Length", file.length);
+    response.end(file);
   }
 
   /**

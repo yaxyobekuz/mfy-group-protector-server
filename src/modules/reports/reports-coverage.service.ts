@@ -103,7 +103,7 @@ export interface CoverageReport {
    * ⚠️ TUMAN KESIMIDA KO'RSATILMAYDI va ko'rsatib ham bo'lmaydi: bu
    * guruhlarning qaysi tumanga tegishli ekani NOMA'LUM — aynan
    * shuning uchun ular biriktirilmagan. Jadvaldan TASHQARIDA, alohida
-   * son bo'lib turadi va ro'yxatini CSV qilib olish mumkin.
+   * son bo'lib turadi va ro'yxatini Excel qilib olish mumkin.
    */
   unassignedGroups: number;
   totals: {

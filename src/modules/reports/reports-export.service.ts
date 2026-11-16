@@ -1,65 +1,54 @@
 /**
  * HISOBOTNI YUKLAB OLISH — RAHBARIYAT UCHUN.
  *
- * ── NIMA UCHUN CSV, PDF EMAS ──────────────────────────────────────────
+ * ── NIMA UCHUN XLSX, PDF EMAS ─────────────────────────────────────────
  *
  * ⚠️ RAHBARIYAT RAQAMNI QAYTA ISHLAYDI: hisobot ko'pincha boshqa
  * jadvalga ko'chiriladi, yig'iladi, taqdimotga qo'yiladi. PDF buni
  * BUTUNLAY to'sadi — undan raqamni qo'lda ko'chirish kerak bo'lardi.
- * CSV esa Excel'da ham, Google Sheets'da ham to'g'ridan-to'g'ri
- * ochiladi.
  *
- * ⚠️ YANGI PAKET QO'SHILMADI (`exceljs`, `pdfkit`): CSV yasash 40
- * qatorga sig'adi va bu kutubxonalar o'nlab megabayt bog'liqlik
- * keltirardi — panelning boshqa joyida ular umuman ishlatilmaydi.
+ * ── NIMA UCHUN CSV EMAS ───────────────────────────────────────────────
  *
- * ── UTF-8 BOM MAJBURIY ────────────────────────────────────────────────
+ * ⚠️ CSV ESA JADVAL EMAS, MATN FAYLI: unda shrift ham, rang ham,
+ * ustun kengligi ham yo'q va Excel uni HAR mintaqada boshqacha
+ * o'qiydi (ajratgich, kodlash, uzun sonning ilmiy shaklga
+ * aylanishi). Shuning uchun eksport XLSX ga ko'chirildi va butun
+ * yasash mantiqi BITTA joyda — `common/xlsx.ts`.
  *
- * ⚠️ BOM'SIZ EXCEL (Windows) FAYLNI CP1251 deb o'qiydi va o'zbekcha
- * matn "Ð¢Ð¾Ð·Ð°Ð»Ð¸Ðº" bo'lib chiqadi. Buni ko'rgan odam "tizim
- * buzuq" deb xulosa qiladi — holbuki ma'lumot joyida.
+ * ⚠️ SHRIFT, RANG VA MARKAZLASH — O'SHA YAGONA MANBADA: har
+ * kesimda qaytarilsa, bittasi albatta eskirardi va hisobotlar
+ * boshqa-boshqa ko'rinishda chiqardi.
  *
- * ⚠️ AJRATGICH — NUQTALI VERGUL, VERGUL EMAS: Excel'ning ruscha/
- * o'zbekcha mintaqaviy sozlamasida o'nlik ajratgich VERGUL va
- * vergulli CSV bitta ustunga yopishib qoladi.
+ * ── RAQAM BO'LGANI SON BO'LIB YOZILADI ────────────────────────────────
+ *
+ * ⚠️ `count`, `population`, `per1000` — `number` turida uzatiladi,
+ * `String()` ga o'ralmaydi: shundagina Excel'da ustunni yig'ish va
+ * saralash ishlaydi. Qiymat yo'q bo'lsa `—` (matn) qoladi — `0`
+ * yozilsa "muammo yo'q" degan NOTO'G'RI xulosa chiqardi
+ * (`population` doktrinasi).
+ *
+ * ⚠️ `chatId`, telefon va murojaat raqami esa ATAYLAB matn
+ * (`xlsxText`): ular raqamdan tuzilgan, lekin arifmetik qiymat
+ * emas — son bo'lib yozilsa Excel ularni "chiroyli" qilib buzadi.
  */
 
 import { Injectable } from "@nestjs/common";
 
 import type { ScopeContext } from "../../common/scope.util";
 import { formatDateTimeUz } from "../../common/date.util";
+import { buildXlsx, xlsxText } from "../../common/xlsx";
 import { PrismaService } from "../../prisma/prisma.service";
 import { ReportsService } from "./reports.service";
 import { ReportsCoverageService } from "./reports-coverage.service";
 import type { ReportQuery } from "./dto/reports.dto";
 
-/** Excel (Windows) uchun — fayl boshidagi BOM. */
-const BOM = "﻿";
-const SEPARATOR = ";";
-
-/**
- * ⚠️ QIYMAT QOCHIRILADI: MFY nomida ham, murojaat matnida ham
- * nuqtali vergul va qator uzilishi bo'lishi mumkin va ularsiz butun
- * jadval SURILIB ketardi.
- */
-const cell = (value: unknown): string => {
-  if (value === null || value === undefined) return "";
-
-  const text = String(value);
-  if (!/[";\n\r]/.test(text)) return text;
-
-  return `"${text.replace(/"/g, '""')}"`;
-};
-
-const toCsv = (headers: string[], rows: unknown[][]): string =>
-  BOM +
-  [headers, ...rows]
-    .map((row) => row.map(cell).join(SEPARATOR))
-    .join("\r\n");
+/** Qiymat yo'q — `0` EMAS, chiziqcha. */
+const DASH = "—";
 
 export interface ExportResult {
   filename: string;
-  csv: string;
+  /** Tayyor XLSX — HTTP javobi bo'lib ketadi. */
+  file: Buffer;
 }
 
 @Injectable()
@@ -102,16 +91,35 @@ export class ReportsExportService {
 
   private stamp(): string {
     // ⚠️ FAYL NOMIDA SANA: rahbariyat bir necha hisobotni yonma-yon
-    // saqlaydi va `hisobot.csv` ularning hammasini ustma-ust yozardi.
+    // saqlaydi va `hisobot.xlsx` ularning hammasini ustma-ust
+    // yozardi.
     const now = new Date();
     return now.toISOString().slice(0, 10);
+  }
+
+  /**
+   * ⚠️ FAYL NOMI VA VARAQ NOMI BIR JOYDA YASALADI: varaq nomsiz
+   * qolsa Excel uni `Sheet1` deb ko'rsatadi va bir necha hisobotni
+   * bitta kitobga ko'chirgan odam qaysi varaq nima ekanini
+   * bilmasdi.
+   */
+  private sheet(
+    slug: string,
+    sheetName: string,
+    headers: string[],
+    rows: unknown[][],
+  ): ExportResult {
+    return {
+      filename: `hisobot-${slug}-${this.stamp()}.xlsx`,
+      file: buildXlsx({ name: sheetName, headers, rows }),
+    };
   }
 
   private async overview(scope: ScopeContext, query: ReportQuery): Promise<ExportResult> {
     const data = await this.reports.overview(scope, query);
 
     /**
-     * ⚠️ UMUMIY KESIM — \"KO'RSATKICH / QIYMAT\" USTUNLARIDA: unda har
+     * ⚠️ UMUMIY KESIM — "KO'RSATKICH / QIYMAT" USTUNLARIDA: unda har
      * xil turdagi raqamlar bor (son, foiz, soat) va ularni bitta
      * gorizontal qatorga tiqish Excel'da o'qib bo'lmaydigan jadval
      * berardi.
@@ -123,14 +131,11 @@ export class ReportsExportService {
       ["Hal qilingan", data.status?.resolved ?? 0],
       ["Rad etilgan", data.status?.rejected ?? 0],
       ["Muddati o'tgan", data.overdue],
-      ["Hal qilish ulushi (%)", data.resolutionRate ?? "—"],
-      ["O'rtacha hal qilish (soat)", data.avgResolutionHours ?? "—"],
+      ["Hal qilish ulushi (%)", data.resolutionRate ?? DASH],
+      ["O'rtacha hal qilish (soat)", data.avgResolutionHours ?? DASH],
     ];
 
-    return {
-      filename: `hisobot-umumiy-${this.stamp()}.csv`,
-      csv: toCsv(["Ko'rsatkich", "Qiymat"], rows),
-    };
+    return this.sheet("umumiy", "Umumiy", ["Ko'rsatkich", "Qiymat"], rows);
   }
 
   private async territory(scope: ScopeContext, query: ReportQuery): Promise<ExportResult> {
@@ -138,23 +143,22 @@ export class ReportsExportService {
 
     /**
      * ⚠️ NISBIY KO'RSATKICH HAM USTUNDA: aynan u rahbariyatga
-     * kerak — \"Asakada 450, Ulug'norda 50\" degan mutlaq son
+     * kerak — "Asakada 450, Ulug'norda 50" degan mutlaq son
      * tumanlarni solishtirishga yaramaydi.
      */
     const rows = data.districts.map((district) => [
       district.name,
       district.count,
-      district.population ?? "—",
-      district.per1000 ?? "—",
+      district.population ?? DASH,
+      district.per1000 ?? DASH,
     ]);
 
-    return {
-      filename: `hisobot-tumanlar-${this.stamp()}.csv`,
-      csv: toCsv(
-        ["Tuman", "Murojaat", "Aholi", "1000 kishiga"],
-        rows,
-      ),
-    };
+    return this.sheet(
+      "tumanlar",
+      "Tumanlar",
+      ["Tuman", "Murojaat", "Aholi", "1000 kishiga"],
+      rows,
+    );
   }
 
   private async categories(scope: ScopeContext, query: ReportQuery): Promise<ExportResult> {
@@ -165,59 +169,57 @@ export class ReportsExportService {
       // Excel'da ustun bo'yicha guruhlash va saralash mumkin
       // bo'lishi kerak ("Kommunal xizmatlar → Suv" bitta satr
       // bo'lsa, buni qilib bo'lmasdi).
-      item.parentName ?? "—",
+      item.parentName ?? DASH,
       item.name,
       item.count,
       item.overdue,
     ]);
 
-    return {
-      filename: `hisobot-yonalishlar-${this.stamp()}.csv`,
-      csv: toCsv(
-        ["Asosiy yo'nalish", "Yo'nalish", "Murojaat", "Muddati o'tgan"],
-        rows,
-      ),
-    };
+    return this.sheet(
+      "yonalishlar",
+      "Yo'nalishlar",
+      ["Asosiy yo'nalish", "Yo'nalish", "Murojaat", "Muddati o'tgan"],
+      rows,
+    );
   }
 
   private async recurring(scope: ScopeContext, query: ReportQuery): Promise<ExportResult> {
     const data = await this.reports.recurring(scope, query);
 
     const rows = data.items.map((item) => [
-      item.district?.name ?? "—",
+      item.district?.name ?? DASH,
       item.mahallaName,
       item.parentName ? `${item.parentName} → ${item.categoryName}` : item.categoryName,
       item.total,
       item.incidents,
       item.duplicates,
       item.perMonth,
-      item.firstAt ? formatDateTimeUz(item.firstAt) : "—",
-      item.lastAt ? formatDateTimeUz(item.lastAt) : "—",
+      item.firstAt ? formatDateTimeUz(item.firstAt) : DASH,
+      item.lastAt ? formatDateTimeUz(item.lastAt) : DASH,
     ]);
 
-    return {
-      filename: `hisobot-tizimli-muammolar-${this.stamp()}.csv`,
-      csv: toCsv(
-        [
-          "Tuman",
-          "MFY",
-          "Yo'nalish",
-          "Jami",
-          "Hodisa",
-          "Takroriy",
-          "Oyiga",
-          "Birinchi",
-          "Oxirgi",
-        ],
-        rows,
-      ),
-    };
+    return this.sheet(
+      "tizimli-muammolar",
+      "Tizimli muammolar",
+      [
+        "Tuman",
+        "MFY",
+        "Yo'nalish",
+        "Jami",
+        "Hodisa",
+        "Takroriy",
+        "Oyiga",
+        "Birinchi",
+        "Oxirgi",
+      ],
+      rows,
+    );
   }
 
   /**
    * MUROJAATLAR RO'YXATI — XOM MA'LUMOT.
    *
-   * ⚠️ CHEGARA BOR (5000): butun jadvalni CSV ga aylantirish
+   * ⚠️ CHEGARA BOR (5000): butun jadvalni bitta faylga aylantirish
    * serverning xotirasini yeb qo'yardi va Excel ham uni ochmasdi.
    * Rahbariyatga kerak bo'lgani — kesim, xom ma'lumot esa tekshirish
    * uchun.
@@ -250,9 +252,12 @@ export class ReportsExportService {
     });
 
     const rows = issues.map((issue) => [
-      issue.publicNo,
-      issue.mahalla?.district.name ?? "—",
-      issue.mahalla?.name ?? "—",
+      // ⚠️ MUROJAAT RAQAMI — MATN: u raqamdan tuzilgan bo'lsa ham
+      // identifikator va Excel uni son deb o'qisa, boshidagi nol
+      // yo'qolardi.
+      xlsxText(issue.publicNo),
+      issue.mahalla?.district.name ?? DASH,
+      issue.mahalla?.name ?? DASH,
       issue.category.parent
         ? `${issue.category.parent.name} → ${issue.category.name}`
         : issue.category.name,
@@ -261,43 +266,44 @@ export class ReportsExportService {
       issue.source,
       issue.assignee
         ? `${issue.assignee.firstName} ${issue.assignee.lastName}`.trim()
-        : "—",
+        : DASH,
       issue.citizen
         ? `${issue.citizen.firstName} ${issue.citizen.lastName ?? ""}`.trim()
-        : "—",
-      issue.citizen?.phone ?? "—",
+        : DASH,
+      // ⚠️ TELEFON — MATN: son bo'lib yozilsa `+` yo'qolardi va
+      // xodim raqamni qo'lda tiklab o'tirardi.
+      xlsxText(issue.citizen?.phone ?? DASH),
       formatDateTimeUz(issue.createdAt),
-      issue.dueAt ? formatDateTimeUz(issue.dueAt) : "—",
-      issue.reviewedAt ? formatDateTimeUz(issue.reviewedAt) : "—",
+      issue.dueAt ? formatDateTimeUz(issue.dueAt) : DASH,
+      issue.reviewedAt ? formatDateTimeUz(issue.reviewedAt) : DASH,
       issue.duplicateOfId ? "ha" : "",
       issue.isSuspicious ? "ha" : "",
       issue.body.slice(0, 300),
     ]);
 
-    return {
-      filename: `hisobot-murojaatlar-${this.stamp()}.csv`,
-      csv: toCsv(
-        [
-          "Raqam",
-          "Tuman",
-          "MFY",
-          "Yo'nalish",
-          "Holat",
-          "Ustuvorlik",
-          "Manba",
-          "Ijrochi",
-          "Yuborgan",
-          "Telefon",
-          "Kelgan",
-          "Muddat",
-          "Yopilgan",
-          "Takroriy",
-          "Shubhali",
-          "Matn",
-        ],
-        rows,
-      ),
-    };
+    return this.sheet(
+      "murojaatlar",
+      "Murojaatlar",
+      [
+        "Raqam",
+        "Tuman",
+        "MFY",
+        "Yo'nalish",
+        "Holat",
+        "Ustuvorlik",
+        "Manba",
+        "Ijrochi",
+        "Yuborgan",
+        "Telefon",
+        "Kelgan",
+        "Muddat",
+        "Yopilgan",
+        "Takroriy",
+        "Shubhali",
+        "Matn",
+      ],
+      rows,
+    );
   }
 
   // ════════════════════════════════════════════════════════════
@@ -315,18 +321,18 @@ export class ReportsExportService {
   private async coverage(scope: ScopeContext): Promise<ExportResult> {
     const data = await this.coverageService.coverage(scope);
 
-    const rows = data.districts.map((row) => [
+    const rows: unknown[][] = data.districts.map((row) => [
       row.districtName,
       row.mahallaTotal,
       row.covered,
       row.notAttached,
       row.notAdmin,
       row.adminNoDelete,
-      row.coverageRate ?? "—",
+      row.coverageRate ?? DASH,
     ]);
 
     /**
-     * ⚠️ JAMI QATOR CSV GA QO'SHILADI: rahbariyat faylni ochib,
+     * ⚠️ JAMI QATOR FAYLGA QO'SHILADI: rahbariyat faylni ochib,
      * ustunni o'zi yig'ib o'tirmasligi kerak — va qo'lda
      * yig'ilganda xato bo'lishi mumkin (arxivlangan MFY lar
      * hisobga olinmaydi, buni faqat server biladi).
@@ -338,24 +344,23 @@ export class ReportsExportService {
       data.totals.notAttached,
       data.totals.notAdmin,
       data.totals.adminNoDelete,
-      data.totals.coverageRate ?? "—",
+      data.totals.coverageRate ?? DASH,
     ]);
 
-    return {
-      filename: `hisobot-qamrov-${this.stamp()}.csv`,
-      csv: toCsv(
-        [
-          "Tuman",
-          "MFY jami",
-          "Bot bor",
-          "Bot yo'q",
-          "Admin emas",
-          "O'chirish huquqi yo'q",
-          "Qamrov (%)",
-        ],
-        rows,
-      ),
-    };
+    return this.sheet(
+      "qamrov",
+      "Qamrov",
+      [
+        "Tuman",
+        "MFY jami",
+        "Bot bor",
+        "Bot yo'q",
+        "Admin emas",
+        "O'chirish huquqi yo'q",
+        "Qamrov (%)",
+      ],
+      rows,
+    );
   }
 
   /**
@@ -378,44 +383,43 @@ export class ReportsExportService {
     const rows = groups.map((group) => [
       group.title,
       group.type,
-      group.username ? `@${group.username}` : "—",
+      group.username ? `@${group.username}` : DASH,
       // ⚠️ HAVOLA FAQAT OMMAVIY GURUHDA bor: yopiq guruhda
       // `username` yo'q va u faqat taklif havolasi bilan ochiladi
       // (uni bot bermaydi).
-      group.username ? `https://t.me/${group.username}` : "—",
-      group.memberCount ?? "—",
+      group.username ? `https://t.me/${group.username}` : DASH,
+      group.memberCount ?? DASH,
       group.status,
       group.status === "administrator" ? "ha" : "",
       group.canDeleteMessages ? "ha" : "",
       group.isOfficial ? "ha" : "",
       group.guardEnabled ? "ha" : "",
       formatDateTimeUz(group.joinedAt),
-      // ⚠️ `chatId` OXIRGI USTUNDA: u uzun manfiy son va Excel
-      // uni ilmiy shaklga (`-1,00E+12`) aylantirib qo'yadi —
-      // boshida tursa, jadval o'qilmaydigan bo'lib ko'rinardi.
-      // Oxirida esa xodim uni e'tiborsiz qoldiradi.
-      group.chatId,
+      // ⚠️ `chatId` OXIRGI USTUNDA VA MATN SIFATIDA: u uzun manfiy
+      // son va son bo'lib yozilsa Excel uni ilmiy shaklga
+      // (`-1,00E+12`) aylantirib qo'yadi — xodim esa o'sha id ni
+      // panelga ko'chirishi kerak.
+      xlsxText(group.chatId),
     ]);
 
-    return {
-      filename: `hisobot-biriktirilmagan-guruhlar-${this.stamp()}.csv`,
-      csv: toCsv(
-        [
-          "Guruh nomi",
-          "Turi",
-          "Username",
-          "Havola",
-          "A'zolar",
-          "Bot holati",
-          "Admin",
-          "O'chirish huquqi",
-          "Kuzatuvda",
-          "Qalqon",
-          "Qo'shilgan",
-          "Chat ID",
-        ],
-        rows,
-      ),
-    };
+    return this.sheet(
+      "biriktirilmagan-guruhlar",
+      "Biriktirilmagan guruhlar",
+      [
+        "Guruh nomi",
+        "Turi",
+        "Username",
+        "Havola",
+        "A'zolar",
+        "Bot holati",
+        "Admin",
+        "O'chirish huquqi",
+        "Kuzatuvda",
+        "Qalqon",
+        "Qo'shilgan",
+        "Chat ID",
+      ],
+      rows,
+    );
   }
 }
