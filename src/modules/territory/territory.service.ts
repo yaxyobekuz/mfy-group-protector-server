@@ -365,6 +365,26 @@ export class TerritoryService {
    * yolg'iz import qilsa, xarita yarim chizilgan holda qolardi.
    */
   async importDistrictGeo(dto: ImportDistrictGeoDto, scope: ScopeContext) {
+    return this.writeDistrictGeo(dto.items, scope.userId);
+  }
+
+  /**
+   * TUMAN CHEGARALARINI YOZADI \u2014 XODIM HAM, JOB HAM SHU YERDAN.
+   *
+   * \u26a0\ufe0f `userId` \u2014 `string | null`: chegarani job yuklaganda bu amalni
+   * HECH KIM qilmagan va uni biror xodimga yozib qo'yish auditni
+   * soxtalashtirardi ("kim import qildi" degan savolga yolg'on
+   * javob). Panelda "Tizim" deb ko'rsatiladi \u2014
+   * `groups.service.ts#recordMembershipAudit` dagi ayni qoida.
+   *
+   * \u26a0\ufe0f NUSXA YOZILMADI: nom moslashtirish mantiqi bitta joyda
+   * qoladi. Ikki nusxa bo'lsa, apostrof qoidasi bir joyda
+   * o'zgarib, ikkinchisi eskirardi.
+   */
+  async writeDistrictGeo(
+    items: { name: string; geoJson: unknown }[],
+    userId: string | null,
+  ) {
     const normalize = (value: string): string =>
       value.trim().toLocaleLowerCase("uz").replace(/[\u2018\u2019\u02bb\u02bc`']/g, "'");
 
@@ -381,7 +401,7 @@ export class TerritoryService {
     let updated = 0;
     const missing: string[] = [];
 
-    for (const item of dto.items) {
+    for (const item of items) {
       const id = index.get(normalize(item.name));
 
       if (!id) {
@@ -398,7 +418,7 @@ export class TerritoryService {
     }
 
     await this.audit.record({
-      userId: scope.userId,
+      userId,
       action: "territory.import-geo",
       entity: "District",
       meta: { updated, missing: missing.length },
@@ -414,19 +434,66 @@ export class TerritoryService {
    * viloyat uchun ishlaydi.
    */
   async setProvinceGeo(dto: SetProvinceGeoDto, scope: ScopeContext) {
+    return this.writeProvinceGeo(dto.geoJson, scope.userId);
+  }
+
+  /** `writeDistrictGeo` bilan ayni sabab — job uchun `userId: null`. */
+  async writeProvinceGeo(geoJson: unknown, userId: string | null) {
     await this.prisma.settings.update({
       where: { id: "singleton" },
-      data: { provinceGeoJson: dto.geoJson as Prisma.InputJsonValue },
+      data: { provinceGeoJson: geoJson as Prisma.InputJsonValue },
     });
 
     await this.audit.record({
-      userId: scope.userId,
+      userId,
       action: "territory.import-geo",
       entity: "Settings",
       meta: { province: true },
     });
 
     return { ok: true };
+  }
+
+  /**
+   * CHEGARA BAZADA BORMI — JOB SHU SAVOLDAN BOSHLAYDI.
+   *
+   * ⚠️ IKKI ALOHIDA SAVOL: viloyat romi `settings` da, tumanlar esa
+   * o'z jadvalida. Bittasi bo'lsa ikkinchisi bo'lmasligi mumkin —
+   * masalan rasmiy fayldan faqat tumanlar import qilingan bo'lsa,
+   * job viloyatni OSM dan to'ldirib qo'yadi va teskarisi ham.
+   */
+  async boundariesMissing(): Promise<{ province: boolean; districts: boolean }> {
+    const [settings, districts] = await Promise.all([
+      this.prisma.settings.findUnique({
+        where: { id: "singleton" },
+        select: { provinceGeoJson: true },
+      }),
+      /**
+       * ⚠️ FILTR JS DA, PRISMA `where` IDA EMAS (`boundaries()` dagi
+       * ayni sabab): `Json` ustunida `null` ni filtrlash
+       * `Prisma.DbNull` ni QIYMAT sifatida import qilishni talab
+       * qiladi, bu fayl esa Prisma'ni faqat TUR sifatida oladi.
+       */
+      this.prisma.district.findMany({
+        where: { isArchived: false },
+        select: { geoJson: true },
+      }),
+    ]);
+
+    const withGeo = districts.filter((item) => item.geoJson !== null).length;
+    const total = districts.length;
+
+    return {
+      province: !settings?.provinceGeoJson,
+      /**
+       * ⚠️ "BITTASI HAM YO'Q" SHARTI, "HAMMASI BOR" EMAS: reyestrda
+       * OSM da mavjud bo'lmagan tuman turishi mumkin va "hammasi
+       * to'lmaguncha" shartida job HAR aylanishda Overpass'ga
+       * borib, hech narsani o'zgartirmasdi — ya'ni ommaviy xizmatni
+       * bekorga band qilardi.
+       */
+      districts: total > 0 && withGeo === 0,
+    };
   }
 
   /**
