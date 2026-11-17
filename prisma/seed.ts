@@ -130,6 +130,8 @@ const THREAT_FEEDS: {
   url: string;
   format: "hosts" | "domains" | "adguard" | "urlhaus";
   isEnabled: boolean;
+  /** ⚠️ Har manbaga O'Z oralig'i — `schema.prisma` izohi. */
+  refreshHours: number;
 }[] = [
   {
     // ⚠️ abuse.ch TO'G'RIDAN-TO'G'RI YUKLASHNI YOPDI (HTTP 410) —
@@ -141,6 +143,9 @@ const THREAT_FEEDS: {
     url: "https://malware-filter.gitlab.io/malware-filter/urlhaus-filter-hosts.txt",
     format: "hosts",
     isEnabled: true,
+    // ⚠️ MANBANING O'ZI 12 SOATDA YANGILANADI (yuqoridagi izoh) —
+    // tez-tez so'rash ayni faylni qayta yuklab olish bo'lardi.
+    refreshHours: 12,
   },
   {
     // ⚠️ MIJOZ AYTGAN "GitHub dagi fishing ro'yxatlari" — shu:
@@ -149,18 +154,26 @@ const THREAT_FEEDS: {
     url: "https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master/phishing-domains-ACTIVE.txt",
     format: "domains",
     isEnabled: true,
+    // ⚠️ ENG QIMMATI: 11 MB, ~50 soniya, 200 000 qator. Manba
+    // KUNIGA yangilanadi, ya'ni undan tez so'rashning ma'nosi yo'q.
+    refreshHours: 24,
   },
   {
     name: "OpenPhish",
     url: "https://openphish.com/feed.txt",
     format: "urlhaus",
     isEnabled: true,
+    // ⚠️ ENG TEZ VA ENG ARZON: 264 domen (bir necha kilobayt),
+    // soatlab yangilanadi va aynan TIRIK fishing havolalarini
+    // beradi. Buni sekinlatish — bepul himoyadan voz kechish.
+    refreshHours: 6,
   },
   {
     name: "Phishing Army (blocklist)",
     url: "https://phishing.army/download/phishing_army_blocklist_extended.txt",
     format: "domains",
     isEnabled: true,
+    refreshHours: 24,
   },
   {
     name: "AdGuard DNS filter",
@@ -168,6 +181,9 @@ const THREAT_FEEDS: {
     format: "adguard",
     // ⚠️ STANDART HOLDA O'CHIRILGAN — yuqoridagi izoh.
     isEnabled: false,
+    // ⚠️ REKLAMA FILTRI SEKIN O'ZGARADI va u standart holda
+    // o'chirilgan — haftada bir marta yetarlidan ko'p.
+    refreshHours: 168,
   },
 ];
 
@@ -244,7 +260,11 @@ async function main(): Promise<void> {
   for (const feed of THREAT_FEEDS) {
     await prisma.threatFeed.upsert({
       where: { name: feed.name },
-      update: { url: feed.url, format: feed.format },
+      // ⚠️ ORALIQ HAM TO'G'RILANADI: u ma'muriyat qarori emas,
+      // manbaning TABIATI (hajmi, yangilanish tezligi) — ya'ni
+      // tizim bilishi kerak bo'lgan narsa. `isEnabled` esa
+      // o'zgartirilmaydi, u ma'muriyatniki.
+      update: { url: feed.url, format: feed.format, refreshHours: feed.refreshHours },
       create: feed,
     });
   }

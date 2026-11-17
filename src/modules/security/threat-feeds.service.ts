@@ -92,20 +92,6 @@ const MAX_BLOCKLIST_HOSTS = 500_000;
  * eng katta — ya'ni eng foydali — ro'yxatni JIMGINA chetlab
  * o'tardi.
  */
-/**
- * RO'YXAT QANCHA VAQTDA BIR MARTA YANGILANADI.
- *
- * ⚠️ UCH KUN — MUROSA. Manbalar soatlab yangilanadi va firibgar
- * domen ertalab paydo bo'lib kechqurun bloklanishi mumkin, ya'ni
- * TEZROQ yangilash himoyani kuchaytiradi. Lekin har aylanishda
- * ~350 000 host qayta yuklanadi (bittasi 11 MB, ~50 soniya) — bu
- * manbalarning serveriga ham, bizning bazaga ham sezilarli yuk.
- *
- * ⚠️ CHEGARA ALOHIDA DOIMIYDA, kodga sochilgan emas: uni
- * o'zgartirish bitta qatorlik ish bo'lishi kerak.
- */
-const REFRESH_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
-
 const FETCH_TIMEOUT_MS = 180_000;
 
 /**
@@ -157,7 +143,7 @@ export class ThreatFeedsService {
   // ═══════════════════════════════════════════════════════════════
 
   /**
-   * HAR 3 KUNDA — LEKIN CRON TEZROQ URINADI.
+   * HAR RO'YXAT O'Z MUDDATIDA — CRON ESA TEZ URINADI.
    *
    * ⚠️ MUDDAT CRON IFODASIDA EMAS, HAR RO'YXATNING O'ZIDA
    * (`lastFetchedAt`) — `signals.job.ts` bilan AYNI yondashuv.
@@ -167,16 +153,17 @@ export class ThreatFeedsService {
    * qayta ishga tushganda cron o'tkazib yuborilgan vaqtni
    * BILMAYDI — ro'yxat yana 3 kun eskirib yotardi.
    *
-   * ⚠️ TICK TEZ (6 soat), MUDDAT UZOQ (3 kun): shu ikkisi
-   * ajratilgani uchun server deploy paytida yiqilib ko'tarilsa
-   * ham, keyingi tickda muddati kelgan ro'yxat o'z vaqtida
-   * yangilanadi.
+   * ⚠️ TICK TEZ (6 soat), MUDDAT HAR XIL (6 soatdan bir haftagacha):
+   * shu ikkisi ajratilgani uchun server deploy paytida yiqilib
+   * ko'tarilsa ham, keyingi tickda muddati kelgan ro'yxat o'z
+   * vaqtida yangilanadi.
    *
-   * ⚠️ XATO BERGAN RO'YXAT 3 KUN KUTMAYDI: nosozlikda ham
+   * ⚠️ XATO BERGAN RO'YXAT MUDDATNI KUTMAYDI: nosozlikda ham
    * `lastFetchedAt` yoziladi (`refreshOne` dagi `catch`), ya'ni
    * muddat bo'yicha filtrlansa, bir martalik tarmoq uzilishi
-   * himoyani UCH KUNGA eskirtirib qo'yardi. Shuning uchun
-   * `lastError` bor ro'yxat keyingi tickda QAYTA uriniladi.
+   * himoyani butun oraliqqa (AdGuard uchun — bir haftaga)
+   * eskirtirib qo'yardi. Shuning uchun `lastError` bor ro'yxat
+   * keyingi tickda QAYTA uriniladi.
    *
    * ⚠️ SERVER KO'TARILGANDA DARHOL ISHLAMAYDI: deploy paytida bir
    * vaqtning o'zida bir necha nusxa ko'tarilsa, hammasi birdan
@@ -187,7 +174,13 @@ export class ThreatFeedsService {
   async refreshAll(): Promise<void> {
     const feeds = await this.prisma.threatFeed.findMany({
       where: { isEnabled: true },
-      select: { id: true, name: true, lastFetchedAt: true, lastError: true },
+      select: {
+        id: true,
+        name: true,
+        lastFetchedAt: true,
+        lastError: true,
+        refreshHours: true,
+      },
     });
 
     const now = Date.now();
@@ -199,7 +192,10 @@ export class ThreatFeedsService {
       // Oxirgi urinish xato bergan — muddat kutilmaydi.
       if (feed.lastError) return true;
 
-      return now - feed.lastFetchedAt.getTime() >= REFRESH_INTERVAL_MS;
+      // ⚠️ ORALIQ HAR RO'YXATNING O'ZIDA: OpenPhish 6 soatda,
+      // AdGuard haftada — ularning hajmi va yangilanish tezligi
+      // o'nlab barobar farq qiladi (`schema.prisma` izohi).
+      return now - feed.lastFetchedAt.getTime() >= feed.refreshHours * 3_600_000;
     });
 
     if (due.length === 0) return;

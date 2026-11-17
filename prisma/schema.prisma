@@ -1648,6 +1648,19 @@ model ThreatFeed {
   /// ketadi).
   isEnabled Boolean @default(true) @map("is_enabled")
 
+  /// QANCHA VAQTDA BIR MARTA YANGILANADI (soat).
+  ///
+  /// ⚠️ BITTA SON HAMMASIGA TO'G'RI KELMAYDI: OpenPhish 264 domen
+  /// beradi va soatlab yangilanadi (bir necha kilobayt), AdGuard esa
+  /// 190 000 domen va sekin o'zgaradi. Hammasini tez yangilash
+  /// bazaga kuniga millionlab qator yozishni anglatardi; hammasini
+  /// sekin yangilash esa eng TIRIK manbani bekorga eskirtirardi.
+  ///
+  /// ⚠️ STANDART 72 SOAT — EHTIYOTKOR QIYMAT: keyin qo'shiladigan,
+  /// hajmi o'ylanmagan manba sekin boshlashi kerak. Tezlatish —
+  /// ongli qaror.
+  refreshHours Int @default(72) @map("refresh_hours")
+
   /// ── OXIRGI YANGILANISH ──────────────────────────────────────────
   ///
   /// ⚠️ XATO SAQLANADI: ro'yxat bir hafta yuklanmay turgan bo'lsa,
