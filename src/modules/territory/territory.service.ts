@@ -33,7 +33,9 @@ import {
 import type {
   CreateDistrictDto,
   CreateMahallaDto,
+  ImportDistrictGeoDto,
   ImportMahallaGeoDto,
+  SetProvinceGeoDto,
   UpdateDistrictDto,
   UpdateMahallaDto,
 } from "./dto/territory.dto";
@@ -344,6 +346,130 @@ export class TerritoryService {
     });
 
     return { updated, missing };
+  }
+
+  /**
+   * TUMAN CHEGARALARI — OMMAVIY IMPORT.
+   *
+   * ⚠️ NOM BO'YICHA TOPILADI (MFY dagi ayni sabab): tashqi manbada
+   * bizning id'larimiz yo'q. Tuman nomi viloyatda YAGONA, ya'ni
+   * MFY dagidek ajratuvchi kerak emas.
+   *
+   * ⚠️ TOPILMAGANLARI SANAB QAYTARILADI: import "muvaffaqiyatli"
+   * deb tugab, aslida yarmi tushmay qolishi mumkin — va buni
+   * xaritada sezish juda qiyin (chegara shunchaki chizilmaydi).
+   *
+   * ⚠️ QAMROV TEKSHIRUVI YO'Q VA BU ATAYLAB: ruxsat
+   * `territory.manage` bilan himoyalangan, chegara esa butun
+   * viloyatga tegishli — tuman xodimi o'z tumanining chegarasini
+   * yolg'iz import qilsa, xarita yarim chizilgan holda qolardi.
+   */
+  async importDistrictGeo(dto: ImportDistrictGeoDto, scope: ScopeContext) {
+    const normalize = (value: string): string =>
+      value.trim().toLocaleLowerCase("uz").replace(/[\u2018\u2019\u02bb\u02bc`']/g, "'");
+
+    const districts = await this.prisma.district.findMany({
+      where: { isArchived: false },
+      select: { id: true, name: true },
+    });
+
+    const index = new Map<string, string>();
+    for (const district of districts) {
+      index.set(normalize(district.name), district.id);
+    }
+
+    let updated = 0;
+    const missing: string[] = [];
+
+    for (const item of dto.items) {
+      const id = index.get(normalize(item.name));
+
+      if (!id) {
+        missing.push(item.name);
+        continue;
+      }
+
+      await this.prisma.district.update({
+        where: { id },
+        data: { geoJson: item.geoJson as Prisma.InputJsonValue },
+      });
+
+      updated += 1;
+    }
+
+    await this.audit.record({
+      userId: scope.userId,
+      action: "territory.import-geo",
+      entity: "District",
+      meta: { updated, missing: missing.length },
+    });
+
+    return { updated, missing };
+  }
+
+  /**
+   * VILOYAT CHEGARASI — XARITANING TAYANCHI.
+   *
+   * ⚠️ SOZLAMADA SAQLANADI (`schema.prisma` izohi): tizim bitta
+   * viloyat uchun ishlaydi.
+   */
+  async setProvinceGeo(dto: SetProvinceGeoDto, scope: ScopeContext) {
+    await this.prisma.settings.update({
+      where: { id: "singleton" },
+      data: { provinceGeoJson: dto.geoJson as Prisma.InputJsonValue },
+    });
+
+    await this.audit.record({
+      userId: scope.userId,
+      action: "territory.import-geo",
+      entity: "Settings",
+      meta: { province: true },
+    });
+
+    return { ok: true };
+  }
+
+  /**
+   * XARITA CHEGARALARI — VILOYAT VA TUMANLAR.
+   *
+   * ⚠️ HISOBOT EMAS, TAYANCH: bu yerda SON yo'q — faqat shakl.
+   * Murojaatlar kesimi alohida so'rov bilan keladi
+   * (`/reports/mahalla-map`), chunki u FILTRGA bog'liq va har
+   * o'zgarishda qayta yuklanadi; chegara esa o'zgarmaydi va
+   * keshlanadi.
+   *
+   * ⚠️ QAMROV QO'LLANMAYDI: xaritaning TAYANCHI hammaga bir xil.
+   * Tuman xodimiga faqat o'z tumanining konturini ko'rsatish
+   * xaritani o'qib bo'lmaydigan qilardi — u qayerda turganini
+   * qo'shnilarisiz tushunolmasdi. Chegarada maxfiy ma'lumot yo'q.
+   */
+  async boundaries() {
+    const [settings, districts] = await Promise.all([
+      this.prisma.settings.findUnique({
+        where: { id: "singleton" },
+        select: { provinceGeoJson: true },
+      }),
+      this.prisma.district.findMany({
+        where: { isArchived: false },
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+        select: { id: true, name: true, geoJson: true },
+      }),
+    ]);
+
+    return {
+      province: settings?.provinceGeoJson ?? null,
+      /**
+       * ⚠️ CHEGARASIZLARI MIJOZDA EMAS, SHU YERDA CHIQARIB
+       * TASHLANADI: `null` qiymatlar javobni bekorga shishirardi
+       * (14 tumandan 3 tasi import qilingan bo'lsa ham).
+       *
+       * ⚠️ FILTR JS DA, PRISMA `where` IDA EMAS: `Json` ustunida
+       * `null` ni filtrlash `Prisma.DbNull` ni QIYMAT sifatida
+       * import qilishni talab qiladi, bu fayl esa Prisma'ni
+       * faqat TUR sifatida oladi — ro'yxat 14 qator, farqi yo'q.
+       */
+      districts: districts.filter((district) => district.geoJson !== null),
+    };
   }
 
   async createMahalla(dto: CreateMahallaDto, scope: ScopeContext) {

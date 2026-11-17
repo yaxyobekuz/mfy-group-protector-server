@@ -22,7 +22,9 @@ import {
   ListDistrictQuery,
   ListMahallaQuery,
   UpdateDistrictDto,
+  ImportDistrictGeoDto,
   ImportMahallaGeoDto,
+  SetProvinceGeoDto,
   UpdateMahallaDto,
 } from "./dto/territory.dto";
 
@@ -86,6 +88,44 @@ export class TerritoryController {
    * ⚠️ `territory.manage` RUXSATI: chegara — hududiy kesimning
    * asosi va noto'g'ri import butun xaritani buzadi.
    */
+  /**
+   * XARITA CHEGARALARI — O'QISH.
+   *
+   * ⚠️ `reports.view` RUXSATI: chegara xaritaning tayanchi va
+   * xaritani hisobot uchun kirgan odam ham ko'radi.
+   */
+  @Get("boundaries")
+  @RequirePermissions("reports.view")
+  boundaries() {
+    return this.territory.boundaries();
+  }
+
+  /**
+   * TUMAN CHEGARALARI (GeoJSON) — OMMAVIY IMPORT.
+   *
+   * ⚠️ `districts/:id` DAN OLDIN TURADI — MFY dagi ayni tuzoq:
+   * NestJS yo'llarni E'LON TARTIBIDA solishtiradi va pastda
+   * qo'yilsa, `/territory/districts/geo` so'rovi
+   * `updateDistrict("geo")` ga tushib ketardi.
+   */
+  @Post("districts/geo")
+  @RequirePermissions("territory.manage")
+  importDistrictGeo(
+    @Body() dto: ImportDistrictGeoDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.territory.importDistrictGeo(dto, toScope(user));
+  }
+
+  @Post("province/geo")
+  @RequirePermissions("territory.manage")
+  setProvinceGeo(
+    @Body() dto: SetProvinceGeoDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.territory.setProvinceGeo(dto, toScope(user));
+  }
+
   @Post("mahallas/geo")
   @RequirePermissions("territory.manage")
   importGeo(@Body() dto: ImportMahallaGeoDto, @CurrentUser() user: RequestUser) {

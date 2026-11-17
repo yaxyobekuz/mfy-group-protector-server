@@ -109,6 +109,18 @@ model District {
   /// Ro'yxatdagi tartib — alifbo emas, ma'muriy tartib ko'pincha boshqa.
   sortOrder Int @default(0) @map("sort_order")
 
+  /// TUMAN CHEGARASI — GeoJSON `Polygon`/`MultiPolygon`.
+  ///
+  /// ⚠️ IXTIYORIY (`Mahalla.geoJson` bilan ayni qoida): chegara
+  /// tashqi manbadan keladi va u bo'lmasa xarita ISHLASHDA DAVOM
+  /// ETADI — tuman qatlami shunchaki chizilmaydi. Majburiy
+  /// qilinsa, reyestrga yangi tuman qo'shish chegara topilmaguncha
+  /// bloklanardi.
+  ///
+  /// ⚠️ IMPORT NOM BO'YICHA BORADI (`tools/import-boundaries.mjs`):
+  /// tashqi manbada bizning id'larimiz yo'q.
+  geoJson Json? @map("geo_json")
+
   /// ⚠️ O'CHIRILMAYDI, ARXIVLANADI: tumanga biriktirilgan MFY, guruh,
   /// signal va muammolar tarixi qoladi.
   isArchived Boolean   @default(false) @map("is_archived")
@@ -963,6 +975,18 @@ model Settings {
 
   /// Viloyat/tashkilot nomi — hisobot sarlavhasida.
   orgName String @default("E Murojaat") @map("org_name")
+
+  /// VILOYAT CHEGARASI — xaritaning TAYANCHI.
+  ///
+  /// {W} ALOHIDA JADVALDA EMAS: tizim BITTA viloyat uchun ishlaydi
+  /// va jadval ochilsa, unda abadiy bitta qator yotardi — ustiga
+  /// "qaysi viloyat joriy" degan savol qo'shilardi.
+  ///
+  /// {W} TUMANLAR YIG'INDISIDAN HISOBLANMAYDI: poligonlarni
+  /// birlashtirish (union) kutubxona talab qiladi va natijada
+  /// qo'shni tumanlar orasida yupqa "tirqish"lar qolardi — chegara
+  /// chizig'i esa aynan tashqi kontur bo'lishi kerak.
+  provinceGeoJson Json? @map("province_geo_json")
 
   /// ── AI TAHLILI ──────────────────────────────────────────────────
   ///

@@ -131,6 +131,42 @@ export class MahallaGeoItemDto {
   @IsOptional() @Type(() => Number) @IsLongitude() lng?: number;
 }
 
+/**
+ * TUMAN CHEGARALARINI IMPORT QILISH.
+ *
+ * ⚠️ MFY NIKI BILAN AYNI SHAKL, LEKIN `districtName` SIZ: tuman
+ * nomi viloyatda YAGONA, ya'ni ajratuvchi kerak emas. MFY da u
+ * majburiy edi, chunki har tumanda "Turon", "Birlik" bor.
+ *
+ * ⚠️ ALOHIDA DTO, MFY NIKINI QAYTA ISHLATISH EMAS: `districtName`
+ * ni ixtiyoriy qilib, ikkisini bitta shaklga tiqish "qaysi maydon
+ * qachon kerak" degan savolni har chaqiruvda tug'dirardi.
+ */
+export class ImportDistrictGeoDto {
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => DistrictGeoItemDto)
+  items!: DistrictGeoItemDto[];
+}
+
+export class DistrictGeoItemDto {
+  @IsString() @Length(2, 160) name!: string;
+
+  /** ⚠️ `Feature` EMAS, GEOMETRIYANING O'ZI — MFY dagi ayni qoida. */
+  @IsObject() geoJson!: Record<string, unknown>;
+}
+
+/**
+ * VILOYAT CHEGARASI — BITTA GEOMETRIYA.
+ *
+ * ⚠️ RO'YXAT EMAS: tizim bitta viloyat uchun ishlaydi va chegara
+ * `Settings` da saqlanadi (`schema.prisma` izohi).
+ */
+export class SetProvinceGeoDto {
+  @IsObject() geoJson!: Record<string, unknown>;
+}
+
 export class ArchiveDto {
   @IsBoolean() archived!: boolean;
 }
