@@ -92,6 +92,20 @@ const MAX_BLOCKLIST_HOSTS = 500_000;
  * eng katta — ya'ni eng foydali — ro'yxatni JIMGINA chetlab
  * o'tardi.
  */
+/**
+ * RO'YXAT QANCHA VAQTDA BIR MARTA YANGILANADI.
+ *
+ * ⚠️ UCH KUN — MUROSA. Manbalar soatlab yangilanadi va firibgar
+ * domen ertalab paydo bo'lib kechqurun bloklanishi mumkin, ya'ni
+ * TEZROQ yangilash himoyani kuchaytiradi. Lekin har aylanishda
+ * ~350 000 host qayta yuklanadi (bittasi 11 MB, ~50 soniya) — bu
+ * manbalarning serveriga ham, bizning bazaga ham sezilarli yuk.
+ *
+ * ⚠️ CHEGARA ALOHIDA DOIMIYDA, kodga sochilgan emas: uni
+ * o'zgartirish bitta qatorlik ish bo'lishi kerak.
+ */
+const REFRESH_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
+
 const FETCH_TIMEOUT_MS = 180_000;
 
 /**
@@ -143,10 +157,26 @@ export class ThreatFeedsService {
   // ═══════════════════════════════════════════════════════════════
 
   /**
-   * ⚠️ HAR 6 SOATDA: manbalar soatlab yangilanadi, lekin har soatda
-   * 50 000 qatorli faylni qayta yuklab olish ularning serveriga ham,
-   * bizning bazaga ham keraksiz yuk. Firibgar domenning "yangilik"
-   * muddati soatlarda o'lchanadi, daqiqalarda emas.
+   * HAR 3 KUNDA — LEKIN CRON TEZROQ URINADI.
+   *
+   * ⚠️ MUDDAT CRON IFODASIDA EMAS, HAR RO'YXATNING O'ZIDA
+   * (`lastFetchedAt`) — `signals.job.ts` bilan AYNI yondashuv.
+   * Ifodaga "har uchinchi kun" deb yozilsa (kun maydonida qadam
+   * bilan), u OY CHEGARASIDA buzilardi: 31-kundan keyin 1-kun
+   * keladi va oraliq 3 kun o'rniga 1 kun bo'lib qolardi. Bundan tashqari server
+   * qayta ishga tushganda cron o'tkazib yuborilgan vaqtni
+   * BILMAYDI — ro'yxat yana 3 kun eskirib yotardi.
+   *
+   * ⚠️ TICK TEZ (6 soat), MUDDAT UZOQ (3 kun): shu ikkisi
+   * ajratilgani uchun server deploy paytida yiqilib ko'tarilsa
+   * ham, keyingi tickda muddati kelgan ro'yxat o'z vaqtida
+   * yangilanadi.
+   *
+   * ⚠️ XATO BERGAN RO'YXAT 3 KUN KUTMAYDI: nosozlikda ham
+   * `lastFetchedAt` yoziladi (`refreshOne` dagi `catch`), ya'ni
+   * muddat bo'yicha filtrlansa, bir martalik tarmoq uzilishi
+   * himoyani UCH KUNGA eskirtirib qo'yardi. Shuning uchun
+   * `lastError` bor ro'yxat keyingi tickda QAYTA uriniladi.
    *
    * ⚠️ SERVER KO'TARILGANDA DARHOL ISHLAMAYDI: deploy paytida bir
    * vaqtning o'zida bir necha nusxa ko'tarilsa, hammasi birdan
@@ -157,10 +187,24 @@ export class ThreatFeedsService {
   async refreshAll(): Promise<void> {
     const feeds = await this.prisma.threatFeed.findMany({
       where: { isEnabled: true },
-      select: { id: true, name: true },
+      select: { id: true, name: true, lastFetchedAt: true, lastError: true },
     });
 
-    for (const feed of feeds) {
+    const now = Date.now();
+
+    const due = feeds.filter((feed) => {
+      // Hali bir marta ham yuklanmagan — darhol.
+      if (!feed.lastFetchedAt) return true;
+
+      // Oxirgi urinish xato bergan — muddat kutilmaydi.
+      if (feed.lastError) return true;
+
+      return now - feed.lastFetchedAt.getTime() >= REFRESH_INTERVAL_MS;
+    });
+
+    if (due.length === 0) return;
+
+    for (const feed of due) {
       // ⚠️ KETMA-KET: bir vaqtda beshta 10 MB li faylni yuklash
       // konteyner xotirasini to'ldirib qo'yardi.
       await this.refreshOne(feed.id).catch((error: Error) => {
