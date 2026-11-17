@@ -45,8 +45,27 @@ export const AI_MAX_RETRIES = 1;
  * yig'ilishi mumkin va hammasini bitta so'rovga tiqish kontekst
  * chegarasiga urardi. Ortig'i keyingi to'plamda ko'riladi — navbat
  * yo'qolmaydi.
+ *
+ * ⚠️ 60 DAN 15 GA TUSHIRILDI — TIRIK NOSOZLIKDAN KEYIN
+ * (2026-11-17). Panelda "0 signal" turardi, navbatda esa 300 xabar:
+ * HAR guruh, HAR aylanishda `Request timed out` bilan tushardi va
+ * 24 guruhning birortasi ham tahlil qilinmasdi.
+ *
+ * ⚠️ XATO BIZNING CHEGARAMIZDAN KELMAGAN: `AI_TIMEOUT_MS` — 60
+ * soniya, xato esa ~21 soniyada qaytardi, ya'ni so'rovni SHLYUZNING
+ * O'ZI uzyapti. Bizning tomonda qilsa bo'ladigani — so'rovni
+ * YENGILLASHTIRISH: 122B model uchun 60 ta xabarni bitta javobda
+ * tasniflash og'ir ish.
+ *
+ * ⚠️ BU — CHETLAB O'TISH, TUZATISH EMAS: shlyuz butunlay to'xtagan
+ * bo'lsa yordam bermaydi. Shuning uchun nosozlik logda ko'rinib
+ * turadi va `failedGroups` sanoqchisi o'rnida qoladi.
+ *
+ * ⚠️ NAVBAT YO'QOLMAYDI, FAQAT SEKINLASHADI: bitta aylanishda
+ * guruhdan 15 ta xabar olinadi, qolgani keyingisida. Job har
+ * daqiqada uriladi, ya'ni 300 xabarlik navbat ham tez kamayadi.
  */
-export const MAX_MESSAGES_PER_CALL = 60;
+export const MAX_MESSAGES_PER_CALL = 15;
 
 /** Modeldan so'raladigan eng ko'p signal — bitta to'plamdan. */
 export const MAX_SIGNALS = 10;
