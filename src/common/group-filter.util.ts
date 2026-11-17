@@ -23,7 +23,7 @@
 
 import { CHANNEL_TYPE } from "./chat-type";
 import {
-  isProvinceWide,
+  canTouchUnassigned,
   mahallaScopeWhere,
   type ScopeContext,
 } from "./scope.util";
@@ -62,15 +62,23 @@ export interface GroupListFilter {
 /**
  * Panel ro'yxati uchun Prisma `where`.
  *
- * ⚠️ `includeUnassigned` VILOYAT DARAJASIDA OCHILADI: MFY
- * biriktirilmagan guruh hech qaysi tumanga tegishli emas, lekin u
- * ko'rinmasa hech kim uni biriktirmasdi (`scope.util.ts` izohi).
+ * ⚠️ BIRIKTIRILMAGANLARNI BIRIKTIRADIGAN ODAM KO'RADI
+ * (`canTouchUnassigned`), faqat viloyat xodimi emas. Avval shart
+ * `isProvinceWide` edi va u tuman operatorini BOSHI BERK KO'CHAGA
+ * olib borardi: biriktirish huquqi berilgan, lekin biriktiriladigan
+ * chatlar undan yashirilgan — panelda shunchaki bo'sh ro'yxat
+ * turardi va sababni hech narsa tushuntirmasdi (`scope.util.ts`
+ * dagi tirik holat).
+ *
+ * ⚠️ RO'YXAT VA OMMAVIY AMAL AYNI SHARTNI ISHLATADI va bu ataylab:
+ * operator "ekranda ko'rinayotgan chatlarga" degan va'dani kutadi.
+ * Ikkisi ajralsa, ommaviy amal u KO'RMAGAN chatga tushib ketardi.
  */
 export const groupListWhere = (
   scope: ScopeContext,
   filter: GroupListFilter,
 ) => ({
-  ...mahallaScopeWhere(scope, { includeUnassigned: isProvinceWide(scope) }),
+  ...mahallaScopeWhere(scope, { includeUnassigned: canTouchUnassigned(scope) }),
   ...(filter.isOfficial !== undefined ? { isOfficial: filter.isOfficial } : {}),
   // ⚠️ ANIQ MFY TANLANGAN BO'LSA TUMAN FILTRI ORTIQCHA: MFY
   // allaqachon bitta tumanga tegishli. Ikkalasi birga qo'yilsa va

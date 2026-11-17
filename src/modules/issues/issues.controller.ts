@@ -23,7 +23,7 @@ import {
   RequirePermissions,
   type RequestUser,
 } from "../../common/decorators";
-import type { ScopeContext } from "../../common/scope.util";
+import { toScope } from "../../common/scope.util";
 import { AssignmentRulesService } from "./assignment-rules.service";
 import { CategoriesService } from "./categories.service";
 import { IssuesService } from "./issues.service";
@@ -38,13 +38,6 @@ import {
   SaveAssignmentRuleDto,
 } from "./dto/issues.dto";
 import { UpdateCategoryDto } from "./dto/issues.dto";
-
-const toScope = (user: RequestUser): ScopeContext => ({
-  userId: user.id,
-  role: user.role,
-  scopeKind: user.scopeKind,
-  districtId: user.districtId,
-});
 
 @Controller("issues")
 export class IssuesController {

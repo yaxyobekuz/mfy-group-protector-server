@@ -5,20 +5,13 @@ import {
   RequirePermissions,
   type RequestUser,
 } from "../../common/decorators";
-import type { ScopeContext } from "../../common/scope.util";
+import { toScope } from "../../common/scope.util";
 import { CitizensService } from "./citizens.service";
 import {
   BlockCitizenDto,
   ListCitizensQuery,
   RatingQuery,
 } from "./dto/citizens.dto";
-
-const toScope = (user: RequestUser): ScopeContext => ({
-  userId: user.id,
-  role: user.role,
-  scopeKind: user.scopeKind,
-  districtId: user.districtId,
-});
 
 @Controller("citizens")
 export class CitizensController {

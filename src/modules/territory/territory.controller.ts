@@ -13,7 +13,7 @@ import {
   RequirePermissions,
   type RequestUser,
 } from "../../common/decorators";
-import type { ScopeContext } from "../../common/scope.util";
+import { toScope, type ScopeContext } from "../../common/scope.util";
 import { TerritoryService } from "./territory.service";
 import {
   ArchiveDto,
@@ -27,12 +27,6 @@ import {
 } from "./dto/territory.dto";
 
 /** `RequestUser` → `ScopeContext`. Shakl bir xil, nom boshqa. */
-const toScope = (user: RequestUser): ScopeContext => ({
-  userId: user.id,
-  role: user.role,
-  scopeKind: user.scopeKind,
-  districtId: user.districtId,
-});
 
 @Controller("territory")
 export class TerritoryController {

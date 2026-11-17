@@ -6,20 +6,13 @@ import {
   RequirePermissions,
   type RequestUser,
 } from "../../common/decorators";
-import type { ScopeContext } from "../../common/scope.util";
+import { toScope } from "../../common/scope.util";
 import { XLSX_MIME } from "../../common/xlsx";
 import { ReportsService } from "./reports.service";
 import { ReportsExportService } from "./reports-export.service";
 import { ReportsAiService } from "./reports-ai.service";
 import { ReportsCoverageService } from "./reports-coverage.service";
 import { AssistantBody, DailyQuery, ReportQuery } from "./dto/reports.dto";
-
-const toScope = (user: RequestUser): ScopeContext => ({
-  userId: user.id,
-  role: user.role,
-  scopeKind: user.scopeKind,
-  districtId: user.districtId,
-});
 
 @Controller("reports")
 export class ReportsController {

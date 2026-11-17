@@ -6,7 +6,7 @@ import {
   type RequestUser,
 } from "../../common/decorators";
 import { PERMISSION_GROUPS, ROLE_DEFAULT_PERMISSIONS } from "../../common/permissions";
-import type { ScopeContext } from "../../common/scope.util";
+import { toScope } from "../../common/scope.util";
 import { UsersService } from "./users.service";
 import {
   ArchiveUserDto,
@@ -15,13 +15,6 @@ import {
   ResetPasswordDto,
   UpdateUserDto,
 } from "./dto/users.dto";
-
-const toScope = (user: RequestUser): ScopeContext => ({
-  userId: user.id,
-  role: user.role,
-  scopeKind: user.scopeKind,
-  districtId: user.districtId,
-});
 
 @Controller("users")
 export class UsersController {

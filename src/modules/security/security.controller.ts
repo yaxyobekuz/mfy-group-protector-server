@@ -28,7 +28,7 @@ import {
   RequirePermissions,
   type RequestUser,
 } from "../../common/decorators";
-import type { ScopeContext } from "../../common/scope.util";
+import { toScope } from "../../common/scope.util";
 import { SecurityService } from "./security.service";
 import { ThreatFeedsService } from "./threat-feeds.service";
 import {
@@ -39,13 +39,6 @@ import {
   SetFeedEnabledDto,
   SetGuardDto,
 } from "./dto/security.dto";
-
-const toScope = (user: RequestUser): ScopeContext => ({
-  userId: user.id,
-  role: user.role,
-  scopeKind: user.scopeKind,
-  districtId: user.districtId,
-});
 
 // ═══════════════════════════════════════════════════════════════════
 //  BOT

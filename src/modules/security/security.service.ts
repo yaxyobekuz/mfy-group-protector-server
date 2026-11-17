@@ -62,6 +62,7 @@ import {
 import { groupListWhere } from "../../common/group-filter.util";
 import {
   canTouchDistrict,
+  canTouchGroup,
   signalScopeWhere,
   type ScopeContext,
 } from "../../common/scope.util";
@@ -616,7 +617,14 @@ export class SecurityService {
 
     if (!group) throw new NotFoundException("Guruh topilmadi");
 
-    if (!canTouchDistrict(scope, group.mahalla?.districtId ?? null)) {
+    /**
+     * ⚠️ `canTouchGroup`: biriktirilmagan guruh ro'yxatda
+     * ko'rinadigan bo'lgach (`group-filter.util.ts`), uning
+     * qalqon tugmasi ham ishlashi kerak. Aks holda panelda tugma
+     * turib, server 404 qaytarardi — "panel buzuq" degan eng
+     * yomon taassurot.
+     */
+    if (!canTouchGroup(scope, group.mahalla?.districtId ?? null)) {
       throw new NotFoundException("Guruh topilmadi");
     }
 

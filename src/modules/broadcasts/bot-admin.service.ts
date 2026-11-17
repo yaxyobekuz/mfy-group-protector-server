@@ -95,6 +95,13 @@ export class BotAdminService {
       role: user.role,
       scopeKind: user.scopeKind,
       districtId: user.districtId,
+      /**
+       * ⚠️ RUXSAT RO'YXATI HAM UZATILADI: qamrov ba'zi savollarda
+       * unga qaraydi (`canTouchUnassigned`). Bo'sh massiv berilsa,
+       * botdan kirgan xodim panelda qila oladigan ishni bu yerda
+       * qila olmay qolardi — va sabab hech qayerda ko'rinmasdi.
+       */
+      permissions: user.permissions,
     };
 
     return {

@@ -52,7 +52,8 @@ import {
 import { groupListWhere } from "../../common/group-filter.util";
 import {
   canTouchDistrict,
-  isProvinceWide,
+  canTouchGroup,
+  canTouchUnassigned,
   mahallaScopeWhere,
   type ScopeContext,
 } from "../../common/scope.util";
@@ -450,7 +451,7 @@ export class GroupsService {
     });
     if (!group) throw new NotFoundException("Guruh topilmadi");
 
-    if (!canTouchDistrict(scope, group.mahalla?.districtId ?? null)) {
+    if (!canTouchGroup(scope, group.mahalla?.districtId ?? null)) {
       throw new BadRequestException("Bu guruh sizning qamrovingizda emas");
     }
 
@@ -643,8 +644,20 @@ export class GroupsService {
     });
     if (!group) throw new NotFoundException("Guruh topilmadi");
 
-    // Hozirgi hududga tega olishi kerak...
-    if (!canTouchDistrict(scope, group.mahalla?.districtId ?? null)) {
+    /**
+     * Hozirgi hududga tega olishi kerak...
+     *
+     * ⚠️ `canTouchGroup`, `canTouchDistrict` EMAS: biriktirilmagan
+     * chat hech qaysi tumanniki emas va eski tekshiruv uni tuman
+     * operatoridan BUTUNLAY yopib qo'yardi — ya'ni unga berilgan
+     * `groups.assign` ruxsati bilan qiladigan ishi qolmasdi.
+     *
+     * ⚠️ PASTDAGI IKKINCHI TEKSHIRUV O'RNIDA QOLADI va aynan u
+     * muhim: operator chatni FAQAT o'z tumanining MFY siga
+     * biriktira oladi. Ya'ni "biriktirilmaganni ko'rish" uni
+     * boshqa tumanga jo'nata olish degani emas.
+     */
+    if (!canTouchGroup(scope, group.mahalla?.districtId ?? null)) {
       throw new BadRequestException("Bu guruh sizning qamrovingizda emas");
     }
 
@@ -700,8 +713,15 @@ export class GroupsService {
 
   /** Panel sarlavhasidagi sanoqlar. */
   async getStats(scope: ScopeContext) {
+    /**
+     * ⚠️ SANOQCHILAR RO'YXAT BILAN AYNI SHARTNI ISHLATADI
+     * (`canTouchUnassigned`). Ajralsa, panelda "MFY biriktirilmagan:
+     * 0" deb turib, ro'yxatda o'nlab biriktirilmagan chat
+     * ko'rinardi — yoki teskarisi. Plitkadagi son ro'yxatning
+     * SARLAVHASI, alohida hisobot emas.
+     */
     const scopeWhere = mahallaScopeWhere(scope, {
-      includeUnassigned: isProvinceWide(scope),
+      includeUnassigned: canTouchUnassigned(scope),
     });
 
     const [

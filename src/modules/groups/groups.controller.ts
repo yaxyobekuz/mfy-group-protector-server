@@ -27,7 +27,7 @@ import {
   RequirePermissions,
   type RequestUser,
 } from "../../common/decorators";
-import type { ScopeContext } from "../../common/scope.util";
+import { toScope } from "../../common/scope.util";
 import { GroupsService } from "./groups.service";
 import {
   AssignMahallaDto,
@@ -38,13 +38,6 @@ import {
   SetOfficialDto,
   TouchGroupDto,
 } from "./dto/groups.dto";
-
-const toScope = (user: RequestUser): ScopeContext => ({
-  userId: user.id,
-  role: user.role,
-  scopeKind: user.scopeKind,
-  districtId: user.districtId,
-});
 
 // ═══════════════════════════════════════════════════════════════════
 //  BOT

@@ -5,18 +5,11 @@ import {
   RequirePermissions,
   type RequestUser,
 } from "../../common/decorators";
-import type { ScopeContext } from "../../common/scope.util";
+import { toScope } from "../../common/scope.util";
 import { SignalsService } from "./signals.service";
 import { SignalsJob } from "./signals.job";
 import { SignalAiService } from "./ai/signal-ai.service";
 import { AttachSignalDto, DismissSignalDto, ListSignalsQuery } from "./dto/signals.dto";
-
-const toScope = (user: RequestUser): ScopeContext => ({
-  userId: user.id,
-  role: user.role,
-  scopeKind: user.scopeKind,
-  districtId: user.districtId,
-});
 
 @Controller("signals")
 export class SignalsController {

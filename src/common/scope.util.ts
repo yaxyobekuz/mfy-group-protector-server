@@ -17,13 +17,45 @@
 
 import { ScopeKind } from "@prisma/client";
 
+import type { RequestUser } from "./decorators";
+
 /** So'rov egasining qamrov ma'lumoti — JWT'dan emas, BAZADAN keladi. */
 export interface ScopeContext {
   userId: string;
   role: string;
   scopeKind: ScopeKind;
   districtId: string | null;
+  /**
+   * XODIMNING RUXSATLARI.
+   *
+   * ⚠️ "RUXSAT ≠ QAMROV" DOKTRINASI BUZILMAYDI: ruxsat baribir
+   * `@RequirePermissions` bilan tekshiriladi va bu maydon uning
+   * o'rnini BOSMAYDI. U faqat bitta savol uchun kerak —
+   * "biriktirilmagan chatni kim ko'rsin" (`canTouchUnassigned`):
+   * javob xodimning ISHIGA bog'liq, hududiga emas.
+   *
+   * ⚠️ BAZADAN KELADI (`RequestUser`), tokendan emas — ruxsat olib
+   * qo'yilganda u DARHOL amal qilishi kerak.
+   */
+  permissions: string[];
 }
+
+/**
+ * `RequestUser` → `ScopeContext` — YAGONA MANBA.
+ *
+ * ⚠️ AVVAL BU FUNKSIYA TO'QQIZTA KONTROLLERDA NUSXA BO'LIB YOTARDI
+ * va hammasi bir xil edi. Maydon qo'shilganda ularning bittasi
+ * albatta unutilardi — o'shanda bitta modul eski (to'liqsiz)
+ * qamrov bilan ishlab, buni HECH NARSA ko'rsatmasdi: so'rov xato
+ * bermaydi, shunchaki boshqa natija qaytaradi.
+ */
+export const toScope = (user: RequestUser): ScopeContext => ({
+  userId: user.id,
+  role: user.role,
+  scopeKind: user.scopeKind,
+  districtId: user.districtId,
+  permissions: user.permissions,
+});
 
 /**
  * HECH NARSA TOPILMAYDIGAN SHART.
@@ -55,6 +87,20 @@ export const isProvinceWide = (scope: ScopeContext): boolean =>
  * ular jim turib, xabar ham to'plamay qolardi. Shu sababli
  * biriktirilmaganlarni ko'rsatish VILOYAT darajasining ishi va u
  * `includeUnassigned` bilan ochiladi.
+ *
+ * ⚠️ LEKIN BU TUMAN OPERATORINI BOSHI BERK KO'CHAGA OLIB BORGAN EDI
+ * (tirik holat): Baliqchi tumaniga biriktirish huquqi bilan admin
+ * qo'yilgan xodim panelda 0 ta chat ko'rdi — chunki tumanda hali
+ * BIRORTA ham biriktirilgan guruh yo'q edi, biriktirilmaganlari esa
+ * undan YASHIRILGAN edi. Ya'ni unga berilgan `groups.assign`
+ * ruxsati amalda HECH NARSA qila olmasdi va buni panel ham
+ * tushuntirmasdi: ro'yxat shunchaki bo'sh turardi.
+ *
+ * ⚠️ YECHIM — QAMROVDA EMAS, ISHDA: biriktirilmagan chatni
+ * BIRIKTIRADIGAN odam ko'radi (`canTouchUnassigned`). Qamrovni
+ * kengaytirish (tuman xodimiga boshqa tumanning chatlarini ochish)
+ * noto'g'ri bo'lardi — biriktirilmagan chat esa HECH QAYSI tumanniki
+ * emas, ya'ni uni ko'rsatish begona hududga kirish ham emas.
  *
  * @returns Prisma `where` ga QO'SHILADIGAN bo'lak (bo'sh obyekt = cheklov yo'q)
  */
@@ -144,7 +190,56 @@ export const canTouchDistrict = (
   // ⚠️ BIRIKTIRILMAGAN YOZUVGA TUMAN XODIMI TEGMAYDI: u qaysi tumanga
   // tegishli ekani ma'lum emas va "menikidir" deb qabul qilish boshqa
   // tumanning ishiga aralashish bo'lardi.
+  //
+  // ⚠️ ISTISNO BU YERDA EMAS, `canTouchUnassigned` DA: shart o'nlab
+  // joyda ishlatiladi (signal, murojaat, hudud, xavfsizlik) va uni
+  // shu yerda yumshatish BARCHA modullarni birdan kengaytirib
+  // yuborardi — holbuki gap faqat guruh biriktirish haqida.
   if (!districtId) return false;
 
   return districtId === scope.districtId;
 };
+
+/**
+ * BIRIKTIRILMAGAN CHATGA TEGA OLADIMI.
+ *
+ * ⚠️ JAVOB HUDUDGA EMAS, ISHGA BOG'LIQ. MFY biriktirilmagan guruh
+ * hech qaysi tumanga tegishli EMAS — ya'ni uni tuman xodimiga
+ * ko'rsatish "begona hududga kirish" emas. Lekin uni HAMMAGA
+ * ko'rsatish ham ortiqcha: ro'yxatda guruh nomlari va havolalari bor
+ * va ular faqat BIRIKTIRADIGAN odamga kerak.
+ *
+ * ⚠️ SHUNING UCHUN KALIT — `groups.assign` RUXSATI: biriktirishni
+ * kim bajaradi, biriktirilmaganlarni o'sha ko'radi. Aks holda
+ * ruxsat berilgan-u, bajarish uchun hech narsa ko'rinmaydigan
+ * holat chiqardi (fayl boshidagi `mahallaScopeWhere` izohi — tirik
+ * holat).
+ *
+ * ⚠️ TUMANI KO'RSATILMAGAN XODIM BARIBIR HECH NARSA KO'RMAYDI:
+ * `districtId` bo'sh bo'lsa `mahallaScopeWhere` uni `impossible`
+ * filtriga tushiradi va bu funksiya ham `false` qaytaradi.
+ */
+export const canTouchUnassigned = (scope: ScopeContext): boolean => {
+  if (isProvinceWide(scope)) return true;
+  if (!scope.districtId) return false;
+
+  return scope.permissions.includes("groups.assign");
+};
+
+/**
+ * GURUH/KANAL YOZUVIGA TEGA OLADIMI — biriktirilmaganini ham hisobga
+ * olib.
+ *
+ * ⚠️ ALOHIDA FUNKSIYA, `canTouchDistrict` GA PARAMETR EMAS: chaqiruv
+ * joylari (`assignMahalla`, `setOfficial`, `setGuard`) shu bitta
+ * nomni ko'rib, qoidani bir xil qo'llaydi. Parametr bo'lsa, uni
+ * bittasida berib, boshqasida unutish oson bo'lardi — va o'shanda
+ * panelda tugma ko'rinib, server 404 qaytarardi.
+ */
+export const canTouchGroup = (
+  scope: ScopeContext,
+  districtId: string | null,
+): boolean =>
+  districtId === null
+    ? canTouchUnassigned(scope)
+    : canTouchDistrict(scope, districtId);

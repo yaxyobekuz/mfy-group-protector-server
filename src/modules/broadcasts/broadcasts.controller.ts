@@ -22,7 +22,7 @@ import {
   RequirePermissions,
   type RequestUser,
 } from "../../common/decorators";
-import type { ScopeContext } from "../../common/scope.util";
+import { toScope } from "../../common/scope.util";
 import { BotAdminService } from "./bot-admin.service";
 import { BroadcastsService } from "./broadcasts.service";
 import {
@@ -33,13 +33,6 @@ import {
   CreateBroadcastDto,
   ListBroadcastsQuery,
 } from "./dto/broadcasts.dto";
-
-const toScope = (user: RequestUser): ScopeContext => ({
-  userId: user.id,
-  role: user.role,
-  scopeKind: user.scopeKind,
-  districtId: user.districtId,
-});
 
 @Controller("broadcasts")
 export class BroadcastsController {
