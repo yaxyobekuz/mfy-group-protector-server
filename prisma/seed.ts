@@ -153,7 +153,21 @@ const THREAT_FEEDS: {
     name: "Phishing.Database (GitHub, faol)",
     url: "https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master/phishing-domains-ACTIVE.txt",
     format: "domains",
-    isEnabled: true,
+    /**
+     * ⚠️ STANDART HOLDA O'CHIRILGAN — TIRIK SHIKOYATDAN KEYIN
+     * (2026-11-18). Ro'yxat yuklab olinib tekshirildi: 392 164
+     * yozuv ichida `telegra.ph` va 333 ta `.uz` domeni bor —
+     * ular orasida oddiy do'kon va tashkilot saytlari. Har biri
+     * guruhda o'sha havolali xabarni jimgina o'chirardi.
+     *
+     * ⚠️ FISHING HIMOYASI YO'QOLMADI: Phishing Army (145 420),
+     * URLhaus va OpenPhish o'z joyida — ularda `.uz` domeni ham,
+     * mashhur sayt ham topilmadi.
+     *
+     * ⚠️ PANELDA QAYTA YOQSA BO'LADI: qaror ma'muriyatniki, lekin
+     * standart qiymat EHTIYOTKOR bo'lishi kerak.
+     */
+    isEnabled: false,
     // ⚠️ ENG QIMMATI: 11 MB, ~50 soniya, 200 000 qator. Manba
     // KUNIGA yangilanadi, ya'ni undan tez so'rashning ma'nosi yo'q.
     refreshHours: 24,

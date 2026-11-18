@@ -59,15 +59,29 @@ const INSTALLER_EXTENSIONS = new Set([
 ]);
 
 /**
- * ARXIVLAR — ichida nima borligini bilib bo'lmaydi.
+ * ARXIVLAR — O'CHIRILMAYDI.
  *
- * ⚠️ ALOHIDA RO'YXAT: arxiv o'z-o'zidan zararli EMAS (MFY xodimi
- * hujjatlarni zip qilib tashlashi mumkin), lekin u o'rnatma faylni
- * YASHIRISHNING eng keng tarqalgan yo'li. Shuning uchun u
- * "noma'lum tur" deb belgilanadi va o'chirish sozlamada
- * yoqilgandagina bo'ladi.
+ * ⚠️ QOIDA OLIB TASHLANDI, TIRIK SHIKOYATDAN KEYIN (2026-11-18):
+ * oddiy `.zip` fayllar guruhlarda jimgina o'chib ketardi. Izohda
+ * "o'chirish sozlamada yoqilgandagina bo'ladi" deb yozilgan edi,
+ * LEKIN BUNDAY SOZLAMA YO'Q — `deleteFiles` yoqilgan har guruhda
+ * arxiv darhol o'chirilardi.
+ *
+ * ⚠️ SABAB DOKTRINADA: arxiv o'z-o'zidan zararli EMAS — MFY xodimi
+ * hujjatlarni, rais suratlarni zip qilib tashlaydi. "Shubhada —
+ * tegilmaydi" qoidasi (`SecurityEvent` bo'limi) aynan shu holat
+ * uchun: bot ogohlantirish YOZMAYDI, ya'ni o'chirilgan hisobotni
+ * hech kim izlab topmaydi.
+ *
+ * ⚠️ HIMOYA YO'QOLMADI: `.apk`, `.exe` va IKKI KENGAYTMALI nom
+ * (`hisobot.pdf.apk`) baribir ushlanadi — ular arxiv emas. Arxiv
+ * ICHIDAGI faylni esa bot umuman ko'ra olmaydi, ya'ni o'chirish
+ * taxminga asoslanardi.
+ *
+ * ⚠️ QAYTARMANG. Qaytarish kerak bo'lsa, avval `Settings` ga
+ * ALOHIDA bayroq qo'shiling (standart `false`) va panelda
+ * ko'rsating — aks holda yana bir nechta hisobot yo'qoladi.
  */
-const ARCHIVE_EXTENSIONS = new Set(["zip", "rar", "7z", "tar", "gz", "bz2", "xz"]);
 
 /**
  * HAVOLANI YASHIRADIGAN QISQARTIRGICHLAR.
@@ -77,6 +91,43 @@ const ARCHIVE_EXTENSIONS = new Set(["zip", "rar", "7z", "tar", "gz", "bz2", "xz"
  * shunga tayanadi. Guruhda qisqartirilgan havolaning foydali ishlatilishi
  * kam — rasmiy e'lon to'liq manzil bilan tashlanadi.
  */
+/**
+ * HECH QACHON O'CHIRILMAYDIGAN HOSTLAR.
+ *
+ * ⚠️ TASHQI RO'YXATLAR XATO QILADI va bu tirik holat: 392 000
+ * yozuvli Phishing.Database ichida `telegra.ph` va 333 ta `.uz`
+ * domeni bor edi — ular orasida oddiy do'kon va tashkilot saytlari.
+ * Bitta xato yozuv butun viloyat bo'ylab o'sha havolali har xabarni
+ * o'chirardi, bot esa ogohlantirish yozmaydi (doktrina).
+ *
+ * ⚠️ RO'YXAT QISQA VA ANIQ: faqat MFY guruhida HAQIQATAN
+ * ishlatiladigan, mulki ma'lum domenlar. Uzaytirib yuborish qora
+ * ro'yxatni ma'nosiz qilardi — firibgar ham o'sha domenda sahifa
+ * ocha olsa, himoya yo'qoladi. Shuning uchun bu yerda fayl
+ * almashish va sayt yasash xizmatlari YO'Q.
+ *
+ * ⚠️ `telegra.ph` ATAYLAB BOR: Telegram'ning o'z nashr xizmati va
+ * rasmiy e'lonlar aynan o'sha yerda yoziladi. Firibgar undan
+ * foydalanishi mumkin, lekin o'shanda matn qoidasi
+ * (`inspectText`) va qisqartirgich qoidasi baribir ishlaydi.
+ */
+const ALWAYS_ALLOWED_HOSTS: readonly string[] = [
+  // Telegram — bot ishlaydigan muhitning o'zi
+  "t.me", "telegram.me", "telegram.org", "telegram.dog", "telegra.ph",
+  /**
+   * ⚠️ `gov.uz` BOR, YALANG'OCH `uz` YO'Q: solishtirish SUFFIKS
+   * bo'yicha boradi (`hostMatches`), ya'ni `uz` yozilsa butun
+   * `.uz` zonasi — firibgarning yangi ochgan domeni ham —
+   * o'chirilmaydigan bo'lib qolardi.
+   */
+  "gov.uz",
+  // Ijtimoiy tarmoq va video
+  "youtube.com", "youtu.be", "instagram.com", "facebook.com", "fb.com",
+  "tiktok.com", "vk.com", "ok.ru", "linkedin.com", "x.com", "twitter.com",
+  // Keng ishlatiladigan xizmatlar
+  "google.com", "apple.com", "microsoft.com",
+];
+
 const URL_SHORTENERS = new Set([
   "bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly", "is.gd", "buff.ly",
   "cutt.ly", "rb.gy", "shorturl.at", "rebrand.ly", "bit.do", "clck.ru",
@@ -269,10 +320,6 @@ export const inspectFile = (
     return { kind: "apk_file", reason: `installer_mime:${mime}` };
   }
 
-  if (ext && ARCHIVE_EXTENSIONS.has(ext)) {
-    return { kind: "unknown_file", reason: `archive_extension:${ext}` };
-  }
-
   /**
    * ⚠️ IKKI KENGAYTMALI NOM (`hisobot.pdf.apk`): Windows oxirgisini
    * ishlatadi, odam esa birinchisini o'qiydi. Yuqoridagi tekshiruv
@@ -308,6 +355,26 @@ export const inspectUrl = (
   if (!host) return null;
 
   if (hostMatches(host, config.allowedHosts)) return null;
+
+  /**
+   * ⚠️ KODDAGI OQ RO'YXAT — TASHQI MANBANING XATOSIDAN HIMOYA.
+   * Tirik holat (2026-11-18): Phishing.Database ro'yxatida
+   * `telegra.ph` turardi va MFY raisining e'loni — Telegram'da eng
+   * keng tarqalgan havola turi — har safar jimgina o'chirilardi.
+   *
+   * ⚠️ SOZLAMADAGI OQ RO'YXATDAN ALOHIDA: `guardAllowedHosts` ni
+   * ma'muriyat to'ldiradi va u BO'SH bo'lishi mumkin. Bu ro'yxat
+   * esa "qanday sozlasa ham buzilmasligi kerak" degan zamin —
+   * `gov.uz` ni ham, Telegram'ning o'z domenlarini ham tashqi
+   * ro'yxat xato bilan bloklay olmaydi.
+   *
+   * ⚠️ `SOCIAL_HOSTS` DAN HAM ALOHIDA va ikkisi aralashtirilmaydi:
+   * u "aldov dalili bo'la olmaydi" degani (yashirilgan manzil
+   * qoidasi uchun), bu esa "umuman o'chirilmaydi". Birini
+   * ikkinchisining o'rniga ishlatish qora ro'yxatni ijtimoiy
+   * tarmoqlar uchun BUTUNLAY o'chirib qo'yardi.
+   */
+  if (hostMatches(host, ALWAYS_ALLOWED_HOSTS)) return null;
 
   if (hostMatches(host, config.blockedHosts)) {
     return { kind: "suspicious_url", reason: "blocked_host", url, urlHost: host };
