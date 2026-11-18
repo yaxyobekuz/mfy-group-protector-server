@@ -207,8 +207,8 @@ export class MobileController {
   @Throttle({ [THROTTLE.AI]: {} })
   @Post("appeals/analyze")
   @HttpCode(200)
-  analyze(@Body() dto: AnalyzeDto) {
-    return this.mobile.analyze(dto);
+  analyze(@CurrentCitizen() citizen: RequestCitizen, @Body() dto: AnalyzeDto) {
+    return this.mobile.analyze(dto, citizen.id);
   }
 
   @CitizenOnly()

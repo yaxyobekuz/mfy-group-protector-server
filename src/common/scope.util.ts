@@ -38,6 +38,18 @@ export interface ScopeContext {
    * qo'yilganda u DARHOL amal qilishi kerak.
    */
   permissions: string[];
+
+  /**
+   * TASHKILOT — `scopeKind === "org"` bo'lganda.
+   *
+   * ⚠️ HUDUD EMAS: suv ta'minoti tashkiloti o'z tumanidagi HAMMA
+   * murojaatni emas, faqat O'ZIGA yo'naltirilganini ko'radi. Shu
+   * sababli u `districtId` ning yonida ALOHIDA maydon — ikkisini
+   * bitta "qamrov id'si" ga birlashtirish "bu id tumanmi yoki
+   * tashkilotmi" degan savolni har so'rovda qayta hal qilishga
+   * majbur qilardi.
+   */
+  organizationId: string | null;
 }
 
 /**
@@ -55,6 +67,7 @@ export const toScope = (user: RequestUser): ScopeContext => ({
   scopeKind: user.scopeKind,
   districtId: user.districtId,
   permissions: user.permissions,
+  organizationId: user.organizationId,
 });
 
 /**
@@ -75,6 +88,23 @@ const IMPOSSIBLE = { in: [] as string[] } as const;
  */
 export const isProvinceWide = (scope: ScopeContext): boolean =>
   scope.role === "owner" || scope.scopeKind === ScopeKind.province;
+
+/**
+ * TASHKILOT XODIMIMI.
+ *
+ * ⚠️ `organizationId` HAM TEKSHIRILADI: "qamrov tashkilot, lekin
+ * tashkilot ko'rsatilmagan" holati ma'lumot to'liq emasligini
+ * bildiradi va o'shanda hammasini ochib qo'yish eng xavfli tanlov
+ * bo'lardi (`districtScopeWhere` dagi ayni qoida). Bunday xodim
+ * `false` oladi, ya'ni hududiy funksiyalarga tushadi — ular esa
+ * `districtId` siz unga `impossible` filtri beradi.
+ */
+export const isOrgScope = (
+  scope: ScopeContext,
+): scope is ScopeContext & { organizationId: string } =>
+  scope.role !== "owner" &&
+  scope.scopeKind === ScopeKind.org &&
+  Boolean(scope.organizationId);
 
 /**
  * `Mahalla` BO'YICHA filtrlanadigan jadval uchun shart
@@ -125,6 +155,61 @@ export const mahallaScopeWhere = (
   }
 
   return inDistrict;
+};
+
+/**
+ * MUROJAAT RO'YXATI UCHUN SHART — HUDUD YOKI TASHKILOT.
+ *
+ * ⚠️ `mahallaScopeWhere` NING O'RNINI BOSMAYDI, UNI O'RAYDI:
+ * tashkilot xodimidan boshqa hamma uchun natija AVVALGIDEK. Ikki
+ * alohida funksiya yozilsa, chaqiruvchi har joyda "bu xodim
+ * tashkilotnikimi" deb o'zi tekshirishi kerak bo'lardi — va bitta
+ * joyda u albatta unutilardi.
+ *
+ * ⚠️ TASHKILOT QAMROVI HUDUDIY EMAS: suv ta'minoti tashkiloti o'z
+ * tumanidagi gaz va yo'l muammolarini KO'RMASLIGI kerak. Shuning
+ * uchun filtr `organizationId` bo'yicha va hududiy shart UMUMAN
+ * qo'shilmaydi: tashkilot bir necha tumanga xizmat qilishi mumkin
+ * (viloyat darajasidagi tashkilot — butun viloyatga).
+ *
+ * ⚠️ XAVFSIZ STANDART: biror modul bu funksiyaga O'TKAZILMASA,
+ * tashkilot xodimi `mahallaScopeWhere` ga tushadi va u yerda
+ * `districtId` si yo'qligi uchun `impossible` filtrini oladi — ya'ni
+ * HECH NARSA ko'rmaydi, hammasini emas. Xato "ochib qo'yish"
+ * tomoniga emas, "yopib qo'yish" tomoniga og'adi.
+ */
+export const issueScopeWhere = (
+  scope: ScopeContext,
+  options: { includeUnassigned?: boolean } = {},
+): Record<string, unknown> => {
+  if (isOrgScope(scope)) return { organizationId: scope.organizationId };
+
+  return mahallaScopeWhere(scope, options);
+};
+
+/**
+ * BITTA MUROJAATGA TEGA OLADIMI.
+ *
+ * ⚠️ RO'YXAT FILTRI YETARLI EMAS (`canTouchDistrict` dagi ayni
+ * sabab): `POST /issues/:id/org-done` id bilan keladi va ro'yxatdan
+ * o'tmaydi.
+ *
+ * ⚠️ TASHKILOT XODIMI HUDUD BO'YICHA TEKSHIRILMAYDI: murojaatning
+ * MFY si boshqa tumanda bo'lishi mumkin (viloyat darajasidagi
+ * tashkilot), lekin u aynan SHU tashkilotga yo'naltirilgan.
+ */
+export const canTouchIssue = (
+  scope: ScopeContext,
+  issue: { organizationId: string | null; mahallaId: string | null; districtId: string | null },
+): boolean => {
+  if (isOrgScope(scope)) {
+    return issue.organizationId === scope.organizationId;
+  }
+
+  if (isProvinceWide(scope)) return true;
+  if (issue.mahallaId === null) return false;
+
+  return canTouchDistrict(scope, issue.districtId);
 };
 
 /**

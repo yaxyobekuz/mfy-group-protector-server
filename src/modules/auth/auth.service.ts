@@ -25,6 +25,7 @@
  */
 
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -70,6 +71,10 @@ export interface AuthResult extends TokenPair {
     districtId: string | null;
     districtName: string | null;
     permissions: string[];
+    organizationId: string | null;
+    organizationName: string | null;
+    /** ⚠️ `true` — panel boshqa sahifani ochmaydi (tayyor parol). */
+    mustChangePassword: boolean;
   };
 }
 
@@ -99,7 +104,10 @@ export class AuthService {
   ): Promise<AuthResult> {
     const user = await this.prisma.user.findUnique({
       where: { username: username.trim().toLowerCase() },
-      include: { district: { select: { name: true } } },
+      include: {
+        district: { select: { name: true } },
+        organization: { select: { name: true } },
+      },
     });
 
     // ⚠️ XODIM YO'Q BO'LSA HAM PAROL TEKSHIRILADI (dummy hash bilan).
@@ -159,6 +167,9 @@ export class AuthService {
           user.role === "owner"
             ? (ROLE_DEFAULT_PERMISSIONS.admin ?? [])
             : user.permissions,
+        organizationId: user.organizationId,
+        organizationName: user.organization?.name ?? null,
+        mustChangePassword: user.mustChangePassword,
       },
     };
   }
@@ -261,6 +272,77 @@ export class AuthService {
     });
 
     return { ok: true };
+  }
+
+  /**
+   * O'Z PAROLINI ALMASHTIRADI.
+   *
+   * ⚠️ BU `users.service.ts#resetPassword` DAN BOSHQA AMAL: u yerda
+   * parolni ADMIN boshqa odamga qo'yadi, bu yerda esa xodim
+   * O'ZIGA. Shuning uchun bu yerda eski parol tekshiriladi va
+   * `users.manage` ruxsati TALAB QILINMAYDI — tashkilot xodimida
+   * u yo'q va bo'lmasligi ham kerak.
+   *
+   * ⚠️ `mustChangePassword` TOZALANADI: tayyor parol bilan
+   * yaratilgan hisob shu bayroq bilan keladi va panel uni
+   * almashtirmaguncha boshqa sahifani ochmaydi.
+   *
+   * ⚠️ BARCHA SESSIYALAR YOPILADI (O'ZINING HAM): parol
+   * almashtirishning sababi ko'pincha "parolni boshqa odam
+   * biladi" bo'ladi va eski refresh token amalda qolsa, u odam
+   * baribir kirib turardi. Panel javobdagi YANGI tokenlar bilan
+   * davom etadi — foydalanuvchi qayta kirishga majbur
+   * bo'lmaydi.
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    meta: { ip?: string | null; userAgent?: string | null } = {},
+  ): Promise<TokenPair> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, username: true, passwordHash: true },
+    });
+    if (!user) throw new UnauthorizedException("Xodim topilmadi");
+
+    const valid = await argon2.verify(user.passwordHash, currentPassword).catch(() => false);
+    if (!valid) {
+      await this.audit.record({
+        userId,
+        action: "auth.password_change_failed",
+        ip: meta.ip,
+      });
+      throw new UnauthorizedException("Hozirgi parol xato");
+    }
+
+    /**
+     * ⚠️ YANGISI ESKISI BILAN BIR XIL BO'LMAYDI: tayyor parol
+     * bilan kelgan tashkilot "almashtirdim" degan ekrandan
+     * o'tish uchun o'sha parolni qayta yozib qo'yardi — va
+     * majburiy almashtirishning butun ma'nosi yo'qolardi.
+     */
+    if (await argon2.verify(user.passwordHash, newPassword).catch(() => false)) {
+      throw new BadRequestException("Yangi parol eskisidan boshqa bo'lishi kerak");
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: await AuthService.hashPassword(newPassword),
+        mustChangePassword: false,
+      },
+    });
+
+    await this.revokeAll(userId);
+
+    await this.audit.record({
+      userId,
+      action: "auth.password_changed",
+      ip: meta.ip,
+    });
+
+    return this.issueTokens(user.id, user.username, meta);
   }
 
   /** Barcha qurilmalardan chiqish — parol o'zgarganda ham chaqiriladi. */

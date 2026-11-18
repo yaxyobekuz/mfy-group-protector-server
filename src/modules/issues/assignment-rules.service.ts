@@ -279,6 +279,26 @@ export class AssignmentRulesService {
     }
 
     /**
+     * ⚠️ TASHKILOT XODIMI IJROCHI QILIB QO'YILMAYDI va bu ayni
+     * "boshqa tuman xodimi" tuzog'ining ikkinchi ko'rinishi:
+     * uning qamrovi `organizationId` bo'yicha
+     * (`issueScopeWhere`), ya'ni `assigneeId` ga qo'yilgan
+     * murojaat uning ro'yxatida KO'RINMAYDI. Panelda esa
+     * "ijrochi belgilangan" bo'lib turardi va murojaatni hech
+     * kim ochmasdi.
+     *
+     * ⚠️ TASHKILOTGA YO'NALTIRISH ALOHIDA MEXANIZM:
+     * `OrganizationRoute` (tuman × yo'nalish → tashkilot) va u
+     * `Issue.organizationId` ni to'ldiradi, `assigneeId` ni
+     * emas.
+     */
+    if (user.scopeKind === ScopeKind.org) {
+      throw new BadRequestException(
+        "Tashkilot xodimi ijrochi qilib qo'yilmaydi — tashkilotga yo'naltirish Tashkilotlar bo'limidagi qoida bilan beriladi",
+      );
+    }
+
+    /**
      * ⚠️ XODIM O'SHA TUMANNI KO'RA OLADIMI — TEKSHIRILADI. Boshqa
      * tuman xodimiga biriktirilgan murojaat uning ro'yxatida
      * KO'RINMAYDI (`mahallaScopeWhere`): ya'ni ijrochi qo'yilgan,

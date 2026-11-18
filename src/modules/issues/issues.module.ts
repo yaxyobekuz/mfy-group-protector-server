@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 
 import { AuditService } from "../../common/audit.service";
+import { OrganizationsModule } from "../organizations/organizations.module";
 import { CategoriesController, IssuesController } from "./issues.controller";
 import { AppealTriageService } from "./appeal-triage.service";
 import { AssignmentRulesService } from "./assignment-rules.service";
@@ -9,6 +10,16 @@ import { IssueNotifyService } from "./issue-notify.service";
 import { IssuesService } from "./issues.service";
 
 @Module({
+  /**
+   * ⚠️ `OrganizationsModule` IMPORT QILINADI: murojaat
+   * yaratilishi bilan TASHKILOTGA yo'naltiriladi
+   * (`OrgRoutingService`). Qoida bu modulga ko'chirilsa,
+   * `MahallaAssignee` (MFY × yo'nalish → xodim) va
+   * `OrganizationRoute` (tuman × yo'nalish → tashkilot) bitta
+   * tanaga qo'shilib, "qaysi biri ustun" degan SOXTA savol
+   * tug'ilardi — ular aslida ikki BOSHQA ustunni to'ldiradi.
+   */
+  imports: [OrganizationsModule],
   // ⚠️ `BotIssuesController` OLIB TASHLANDI: bot endi XODIM uchun
   // emas, FUQARO uchun va uning endpoint'lari `mobile` modulida
   // (`bot-citizens.controller.ts`). Eski oqim xodimdan `telegramId`

@@ -8,6 +8,12 @@
  * `sendMessage` metodi esa oddiy HTTP so'rov va uni ikki tomon ham
  * chaqira oladi.
  *
+ * ⚠️ YUBORISHNING O'ZI — `common/telegram.ts`, YAGONA MANBA. Bu
+ * faylda avval o'z `fetch` nusxasi turardi va u yagona manbadan
+ * JIMGINA ajralib ketgan edi: `AbortSignal.timeout` qo'shilgani bu
+ * yerga yetib kelmagan, ya'ni javobsiz so'rov murojaat yopilishini
+ * muzlatib qo'yishi mumkin edi. Bu yerda faqat MATN yasaladi.
+ *
  * ⚠️ XATO YUQORIGA CHIQMAYDI. "Muammo yopildi, lekin xabar
  * yuborilmadi" holati "muammo umuman yopilmadi" dan YAXSHI: javob
  * panelda ko'rinib turadi va kerak bo'lsa qo'lda aytiladi. Shuning
@@ -21,9 +27,8 @@
 
 import { Injectable, Logger } from "@nestjs/common";
 
-import { env } from "../../config/env.config";
-
-const TELEGRAM_API = "https://api.telegram.org";
+import { formatDateTimeUz } from "../../common/date.util";
+import { escapeHtml, sendMessage } from "../../common/telegram";
 
 @Injectable()
 export class IssueNotifyService {
@@ -117,48 +122,114 @@ export class IssueNotifyService {
     }
   }
 
+  /**
+   * YANGI MUROJAAT TASHKILOTGA YO'NALTIRILDI.
+   *
+   * ⚠️ BU XABARNOMA, TOPSHIRIQ EMAS — va matn ham shuni aytadi.
+   * Rasmiy javobni (fuqaroga ketadigan matnni) shtab xodimi yozadi;
+   * tashkilot ishni bajarib, panelda "Bajarildi" deb belgilaydi
+   * (`POST /issues/:id/org-done`). Matnda "javob bering" deyilsa,
+   * tashkilot fuqaroga o'zidan yozib, ikki xil javob paydo bo'lardi.
+   *
+   * ⚠️ FUQARONING ISMI VA TELEFONI YUBORILMAYDI: Telegram chati
+   * tashkilotning ish guruhi bo'lishi mumkin va u yerda o'nlab odam
+   * bor. Murojaat raqami bilan xodim panelda hamma ma'lumotni
+   * ko'radi — ya'ni ma'lumot yo'qolmaydi, shunchaki chatga
+   * tarqatilmaydi.
+   *
+   * ⚠️ XATO YUQORIGA CHIQMAYDI (fayl boshidagi doktrina): "murojaat
+   * yaratildi, lekin xabar ketmadi" holati "murojaat umuman
+   * yaratilmadi" dan YAXSHI — murojaat panelda turadi va kerak
+   * bo'lsa qo'lda aytiladi.
+   */
+  async sendOrgAssignment(input: {
+    chatIds: string[];
+    publicNo: string;
+    categoryName: string;
+    mahallaName: string | null;
+    districtName: string | null;
+    address: string | null;
+    body: string;
+    dueAt: Date | null;
+  }): Promise<void> {
+    if (input.chatIds.length === 0) return;
+
+    const lines = [
+      "📬 <b>Yangi murojaat yo'naltirildi</b>",
+      "",
+      `<b>Raqam:</b> ${this.escapeHtml(input.publicNo)}`,
+      `<b>Yo'nalish:</b> ${this.escapeHtml(input.categoryName)}`,
+    ];
+
+    /**
+     * ⚠️ HUDUD BO'SH BO'LISHI MUMKIN VA BU XATO EMAS: fuqaro
+     * profilida MFY ko'rsatmagan bo'lsa, murojaat hududsiz keladi
+     * (`mobile.service.ts#create`). O'shanda qator UMUMAN
+     * yozilmaydi — "Hudud: Belgilanmagan" degan qator tashkilotga
+     * hech narsa bermasdi.
+     */
+    const place = [input.districtName, input.mahallaName].filter(Boolean).join(", ");
+    if (place) lines.push(`<b>Hudud:</b> ${this.escapeHtml(place)}`);
+    if (input.address) lines.push(`<b>Manzil:</b> ${this.escapeHtml(input.address)}`);
+
+    /**
+     * ⚠️ SANA `formatDateTimeUz` ORQALI — YAGONA MANBA
+     * (`common/date.util.ts`). `toLocaleDateString` TAQIQLANGAN
+     * (CLAUDE.md) va u konteynerda UTC zonasini berib, muddatni
+     * besh soat oldinga ko'rsatardi.
+     */
+    if (input.dueAt) {
+      lines.push(`<b>Muddat:</b> ${this.escapeHtml(formatDateTimeUz(input.dueAt))}`);
+    }
+
+    /**
+     * ⚠️ MATN QISQARTIRILADI: murojaat 4000 belgigacha bo'lishi
+     * mumkin (`CreateIssueDto`) va Telegram bitta xabarga 4096
+     * belgi beradi — sarlavha qatorlari bilan birga chegaradan
+     * o'tib, xabar BUTUNLAY rad etilardi (400). Chatda mazmunni
+     * tushunish uchun boshi yetarli, to'lig'i esa panelda.
+     */
+    const text = input.body.trim();
+    const preview = text.length > 700 ? `${text.slice(0, 700)}…` : text;
+
+    lines.push("", this.escapeHtml(preview));
+    lines.push("", "<i>Rasmiy javobni shtab yozadi. Ishni bajargach, panelda «Bajarildi» deb belgilang.</i>");
+
+    const message = lines.join("\n");
+
+    /**
+     * ⚠️ KETMA-KET, PARALLEL EMAS (`sendSignalAlert` bilan ayni
+     * sabab): Telegram bitta botdan sekundda ~30 xabarni
+     * o'tkazadi va parallel yuborish `429` berardi.
+     */
+    for (const chatId of input.chatIds) {
+      await this.send(chatId, message);
+    }
+  }
+
   // ───────────────────────────────────────────────────────────────
 
   private async send(chatId: string, text: string): Promise<void> {
-    // ⚠️ TOKEN YO'Q BO'LSA JIM O'TKAZILADI: bu majburiy emas
-    // (`env.config.ts`) va uning yo'qligi tizimni to'xtatmasligi
-    // kerak.
-    if (!env.botToken) return;
+    // ⚠️ TOKEN TEKSHIRUVI, TIMEOUT VA `parse_mode` — YAGONA
+    // MANBADA (`common/telegram.ts`). Bu yerda faqat natija
+    // jurnalga yoziladi.
+    const result = await sendMessage(chatId, text);
 
-    try {
-      const response = await fetch(`${TELEGRAM_API}/bot${env.botToken}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text,
-          parse_mode: "HTML",
-          // Havola oldi-ko'rinishi xabarni ikki barobar
-          // uzaytirardi.
-          link_preview_options: { is_disabled: true },
-        }),
-      });
-
-      if (!response.ok) {
-        const body = await response.text();
-        this.logger.warn(`Telegram xabari yuborilmadi (${response.status}): ${body}`);
-      }
-    } catch (error) {
-      // ⚠️ XATO YUQORIGA CHIQMAYDI — fayl boshidagi izoh.
-      this.logger.warn(`Telegram xabari yuborilmadi: ${(error as Error).message}`);
+    if (!result.ok) {
+      // ⚠️ XATO YUQORIGA CHIQMAYDI — fayl boshidagi izoh:
+      // "muammo yopildi, lekin xabar yetib bormadi" holati
+      // "muammo umuman yopilmadi" dan yaxshi.
+      this.logger.warn(`Telegram xabari yuborilmadi: ${result.description}`);
     }
   }
 
   /**
-   * ⚠️ MAJBURIY: `parse_mode: "HTML"` bilan yuborilgan xabarda
-   * `<`, `>`, `&` belgilari teg sifatida o'qiladi. Aholi yozgan
-   * matnda ular bo'lishi oddiy hol ("narx < 100000", "AKFA & Co")
-   * va o'shanda Telegram butun xabarni RAD ETADI (400).
+   * ⚠️ YAGONA MANBADAN (`common/telegram.ts#escapeHtml`): bu yerda
+   * o'z nusxasi turardi va ikkisi ajralib ketsa, bir yo'lda
+   * qochirilmagan `<` butun xabarni Telegram'ga RAD ETTIRARDI
+   * (400) — javob esa hech qachon yetib bormasdi.
    */
   private escapeHtml(value: string): string {
-    return value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    return escapeHtml(value);
   }
 }

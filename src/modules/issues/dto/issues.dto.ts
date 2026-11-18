@@ -57,6 +57,13 @@ export class ListIssuesQuery extends PaginationQuery {
   @IsOptional() @IsString() districtId?: string;
   @IsOptional() @IsString() mahallaId?: string;
   @IsOptional() @IsString() assigneeId?: string;
+  /**
+   * ⚠️ FILTR, QAMROV EMAS: tashkilot xodimining ro'yxati baribir
+   * `issueScopeWhere` bilan kesilgan va bu maydon unga HECH NARSA
+   * qo'shmaydi. U shtab xodimi uchun — "Suvoqova qaysi
+   * murojaatlarga javob bermayapti" degan savol uchun.
+   */
+  @IsOptional() @IsString() organizationId?: string;
   @IsOptional() @toBool() @IsBoolean() overdue?: boolean;
 
   /**
@@ -168,6 +175,17 @@ export class UpdateCategoryDto {
 export class ListAssignmentRulesQuery {
   @IsOptional() @IsString() districtId?: string;
   @IsOptional() @IsString() mahallaId?: string;
+}
+
+/**
+ * TASHKILOT "BAJARDIM" BELGISI.
+ *
+ * ⚠️ `done` IXTIYORIY (standart `true`): panelda bu BITTA tugma va
+ * uni bosish "bajarildi" degani. Belgini olib tashlash kam
+ * uchraydigan holat (xato bosilgan) va u `false` bilan keladi.
+ */
+export class MarkOrgDoneDto {
+  @IsOptional() @toBool() @IsBoolean() done?: boolean;
 }
 
 export class SaveAssignmentRuleDto {

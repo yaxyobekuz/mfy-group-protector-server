@@ -24,6 +24,7 @@ import {
   BOT_ONLY_KEY,
   CITIZEN_ONLY_KEY,
   IS_PUBLIC_KEY,
+  PASSWORD_CHANGE_KEY,
   type RequestCitizen,
   type RequestUser,
 } from "../decorators";
@@ -114,6 +115,16 @@ export class JwtAuthGuard implements CanActivate {
         role: true,
         scopeKind: true,
         districtId: true,
+        organizationId: true,
+        /**
+         * ⚠️ JOIN HAR SO'ROVDA, LEKIN ARZON: `organization_id` —
+         * indekslangan tashqi kalit va u `null` bo'lgan shtab
+         * xodimlari uchun join umuman bajarilmaydi. Nomni
+         * tokenga muhrlash esa tashkilot qayta nomlanganda
+         * panelda eski nomni ko'rsatib turardi.
+         */
+        organization: { select: { name: true } },
+        mustChangePassword: true,
         permissions: true,
         isActive: true,
         isArchived: true,
@@ -131,6 +142,26 @@ export class JwtAuthGuard implements CanActivate {
       throw new ForbiddenException("Hisob faol emas");
     }
 
+    /**
+     * ⚠️ TAYYOR PAROL ALMASHTIRILMAGUNCHA BOSHQA HECH NARSA
+     * ISHLAMAYDI. Tashkilotga parol QOG'OZDA beriladi va u
+     * almashtirilmasa tizimda abadiy qolardi — ro'yxat bir marta
+     * tarqalsa, hammasi birdan ochilib ketardi.
+     *
+     * ⚠️ `403`, `401` EMAS: token YARoQLI va panel uni yangilashga
+     * urinmasligi kerak — aks holda u cheksiz refresh tsikliga
+     * tushardi. Xato matni panelga NIMA QILISH kerakligini
+     * aytadi.
+     */
+    if (
+      user.mustChangePassword &&
+      !this.reflector.getAllAndOverride<boolean>(PASSWORD_CHANGE_KEY, handler)
+    ) {
+      throw new ForbiddenException(
+        "Tayyor parolni almashtirmaguncha tizimdan foydalanib bo'lmaydi",
+      );
+    }
+
     const requestUser: RequestUser = {
       id: user.id,
       username: user.username,
@@ -138,6 +169,9 @@ export class JwtAuthGuard implements CanActivate {
       scopeKind: user.scopeKind,
       districtId: user.districtId,
       permissions: user.permissions,
+      organizationId: user.organizationId,
+      organizationName: user.organization?.name ?? null,
+      mustChangePassword: user.mustChangePassword,
     };
 
     (request as Request & { user: RequestUser }).user = requestUser;

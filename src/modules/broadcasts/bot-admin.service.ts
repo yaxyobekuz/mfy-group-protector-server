@@ -66,6 +66,7 @@ export class BotAdminService {
         role: true,
         scopeKind: true,
         districtId: true,
+        organizationId: true,
         permissions: true,
         isActive: true,
         isArchived: true,
@@ -102,6 +103,15 @@ export class BotAdminService {
        * qila olmay qolardi — va sabab hech qayerda ko'rinmasdi.
        */
       permissions: user.permissions,
+      /**
+       * ⚠️ TASHKILOT XODIMI BU YERGA UMUMAN YETIB KELMAYDI: yuqorida
+       * `broadcast.send` talab qilinadi va u tashkilot hisobiga
+       * berilmaydi. Maydon baribir to'ldiriladi — `ScopeContext`
+       * YAGONA shakl va uni bu yerda to'liqsiz yasash "botdan
+       * kirgan xodim panelda qila oladigan ishni qila olmay
+       * qoladi" degan eski xatoni qaytarardi.
+       */
+      organizationId: user.organizationId,
     };
 
     return {

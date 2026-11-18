@@ -29,6 +29,7 @@ import { GroupsModule } from "./modules/groups/groups.module";
 import { SecurityModule } from "./modules/security/security.module";
 import { SignalsModule } from "./modules/signals/signals.module";
 import { IssuesModule } from "./modules/issues/issues.module";
+import { OrganizationsModule } from "./modules/organizations/organizations.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { SettingsModule } from "./modules/settings/settings.module";
 import { AuditModule } from "./modules/audit/audit.module";
@@ -62,6 +63,7 @@ import { LegalModule } from "./modules/legal/legal.module";
     GroupsModule,
     SecurityModule,
     IssuesModule,
+    OrganizationsModule,
     SignalsModule,
     ReportsModule,
     SettingsModule,
