@@ -192,15 +192,8 @@ export class BotCitizensController {
   @Post("appeals/analyze")
   @HttpCode(200)
   async analyze(@Body() dto: BotAnalyzeDto) {
-    /**
-     * ⚠️ FUQARO SHU YERDA TOPILADI (yoki yaratiladi) va uning
-     * id'si `analyze` ga uzatiladi: taklif yonida "Mas'ul
-     * tashkilot" qatori ko'rsatiladi va u fuqaroning MFY siga
-     * bog'liq (`org-routing.service.ts`). Botda hudud oqimda
-     * so'ralmaydi — u PROFILDA belgilanadi.
-     */
-    const citizen = await this.citizens.resolve(dto);
-    return this.mobile.analyze(dto.analyze, citizen.id);
+    await this.citizens.resolve(dto);
+    return this.mobile.analyze(dto.analyze);
   }
 
   /**

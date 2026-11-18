@@ -3,7 +3,6 @@ import { JwtModule } from "@nestjs/jwt";
 
 import { AuditService } from "../../common/audit.service";
 import { IssuesModule } from "../issues/issues.module";
-import { OrganizationsModule } from "../organizations/organizations.module";
 import { UploadsModule } from "../uploads/uploads.module";
 import { BotCitizensController } from "./bot-citizens.controller";
 import { BotCitizensService } from "./bot-citizens.service";
@@ -24,14 +23,7 @@ import { MobileService } from "./mobile.service";
  * generatsiyasi va xabar yetkazish bitta joyda qoladi.
  */
 @Module({
-  /**
-   * ⚠️ `OrganizationsModule` TO'G'RIDAN-TO'G'RI IMPORT QILINADI,
-   * `IssuesModule` orqali EMAS: Nest modullar ZANJIRI bo'ylab
-   * eksportni avtomatik o'tkazmaydi va `IssuesModule` ga
-   * `OrganizationsModule` ni qayta eksport qilish "bu modul
-   * nimani beradi" degan savolni chalkashtirardi.
-   */
-  imports: [JwtModule.register({}), IssuesModule, OrganizationsModule, UploadsModule],
+  imports: [JwtModule.register({}), IssuesModule, UploadsModule],
   // ⚠️ `AuthCallbackController` OLIB TASHLANDI: u Telegram Login
   // Widget'dan qaytish sahifasi edi (`/auth/callback` → `vshtabi://`
   // deep link). Mobil ilova endi Google bilan kiradi va oradagi

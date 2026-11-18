@@ -104,18 +104,6 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
-    key: "organizations",
-    label: "Tashkilotlar",
-    items: [
-      { key: "organizations.view", label: "Ro'yxatni ko'rish" },
-      {
-        key: "organizations.manage",
-        label: "Tashkilot va yo'naltirish qoidasi",
-        hint: "Bu huquq tashkilotga PANELGA KIRISH hisobi (login-parol) yaratadi va murojaatlar qaysi tashkilotga ketishini belgilaydi. Noto'g'ri qoida butun bir yo'nalishning murojaatlarini begona tashkilotga yuborardi — shuning uchun operatorga BERILMAYDI (`users.manage` bilan ayni sabab).",
-      },
-    ],
-  },
-  {
     key: "territory",
     label: "Hudud",
     items: [
@@ -202,10 +190,6 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     "issues.comment",
     "territory.view",
     "reports.view",
-    // ⚠️ `organizations.manage` OPERATORDA YO'Q: u panelga kirish
-    // hisobi yaratadi va murojaat oqimini boshqa tashkilotga burib
-    // yuborishi mumkin (`users.manage` bilan ayni sabab).
-    "organizations.view",
     // ⚠️ `citizens.manage` OPERATORDA YO'Q (blok — qattiq chora).
     "citizens.view",
     "announcements.manage",
@@ -221,32 +205,7 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
     "territory.view",
     "reports.view",
     "citizens.view",
-    "organizations.view",
   ],
-
-  /**
-   * TASHKILOT XODIMI — ENG TOR TO'PLAM.
-   *
-   * ⚠️ `UserRole` DA YANGI ROL OCHILMADI: bu to'plam tashkilot
-   * hisobi YARATILGANDA `User.permissions` ga nusxalanadi, ya'ni
-   * rolga bog'lanmagan. Yangi rol qo'shilsa, u `PermissionsGuard`,
-   * panel filtri va `ROLE_DEFAULT_PERMISSIONS` ning uchalasiga
-   * tegishli bo'lib, "rolga bog'lab qo'ymaslik" qarori buzilardi
-   * (fayl boshidagi izoh).
-   *
-   * ⚠️ `issues.resolve` YO'Q va bu ATAYLAB: murojaatni yopish
-   * fuqaroning Telegram chatiga rasmiy javob yuboradi va uni
-   * qaytarib bo'lmaydi. Yuzlab tashkilot hisobiga bu huquqni
-   * berish `broadcast.send` ni operatorga berish bilan ayni
-   * xavf. Tashkilot izoh yozadi va "bajarildi" deb belgilaydi
-   * (`POST /issues/:id/org-done`), yopishni shtab xodimi qiladi.
-   *
-   * ⚠️ `issues.view` NING O'ZI HAMMASINI OCHMAYDI: tashkilot
-   * xodimining QAMROVI `issueScopeWhere` bilan o'z tashkilotiga
-   * kesilgan (`scope.util.ts`). Ruxsat va qamrov — ikki alohida
-   * narsa (fayl boshidagi izoh).
-   */
-  org_staff: ["issues.view", "issues.comment"],
 };
 
 /** Noma'lum kalitlarni ajratadi — xodim saqlashda tekshiriladi. */

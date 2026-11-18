@@ -134,8 +134,6 @@ model District {
   citizens      Citizen[]
   announcements Announcement[]
   broadcasts    Broadcast[]
-  organizations Organization[]
-  orgRoutes     OrganizationRoute[]
 
   @@index([isArchived, sortOrder])
   @@map("districts")
@@ -218,23 +216,6 @@ enum ScopeKind {
   province
   /// Faqat `User.districtId` dagi tuman.
   district
-
-  /// TASHKILOT XODIMI — faqat O'Z tashkilotiga yo'naltirilgan
-  /// murojaatlar (`User.organizationId`).
-  ///
-  /// ⚠️ BU HUDUDIY QAMROV EMAS va shuning uchun uchinchi qiymat
-  /// kerak bo'ldi: suv ta'minoti tashkiloti o'z tumanidagi HAMMA
-  /// murojaatni emas, faqat O'ZIGA tegishlisini ko'radi. Tuman
-  /// qamroviga qo'yilsa, u qo'shnisining gaz va yo'l muammolarini
-  /// ham ko'rib turardi.
-  ///
-  /// ⚠️ MAVJUD HUDUDIY FUNKSIYALAR (`mahallaScopeWhere`,
-  /// `districtScopeWhere`) bu xodimga HECH NARSA bermaydi —
-  /// `districtId` si yo'q, ya'ni `impossible` filtri ishlaydi. Bu
-  /// ATAYLAB: biror modulni `issueScopeWhere` ga o'tkazish
-  /// unutilsa, tashkilot xodimi hech narsa ko'rmaydi — hammasini
-  /// emas ("ochib qo'yishdan xavfsizroq").
-  org
 }
 
 enum UserRole {
@@ -274,31 +255,6 @@ model User {
   scopeKind  ScopeKind @default(district) @map("scope_kind")
   districtId String?   @map("district_id")
 
-  /// ── TASHKILOT XODIMI ────────────────────────────────────────────
-  ///
-  /// ⚠️ `scopeKind == org` BO'LSA MAJBURIY (tekshiruv service'da —
-  /// `districtId` bilan ayni sabab: shartli NOT NULL ni bazada
-  /// ifodalash mumkin emas). Qo'yilmasa xodim HECH NARSA ko'rmaydi.
-  ///
-  /// ⚠️ TASHKILOT XODIMI HAM `User`, UCHINCHI JADVAL EMAS: u panelga
-  /// KIRADI, ya'ni `Citizen`/`User` ajratilgan sabab ("`permissions`
-  /// butun aholiga tarqalardi") bu yerga tegishli emas. Uchinchi
-  /// jadval uchinchi sir, uchinchi guard va uchinchi sessiya
-  /// jadvalini talab qilardi — barchasi ayni ishni qilib.
-  organizationId String? @map("organization_id")
-
-  /// ── TAYYOR PAROLNI ALMASHTIRISH ─────────────────────────────────
-  ///
-  /// ⚠️ TASHKILOTGA PAROL QOG'OZDA BERILADI ("app ijro" o'rniga
-  /// tayyor login-parol). Almashtirish majburiy bo'lmasa, yuzlab
-  /// tashkilotning paroli tizimda ABADIY qolardi — va ularning
-  /// ro'yxati bir marta tarqalsa, hammasi birdan ochilib ketardi.
-  ///
-  /// ⚠️ MAVJUD XODIMLARGA TEGMAYDI (`false`): migratsiya tirik
-  /// bazada ishlaydi va shtab xodimlari ertalab panelga kirganda
-  /// to'siqqa urilmasligi kerak.
-  mustChangePassword Boolean @default(false) @map("must_change_password")
-
   /// Ruxsatlar — `common/permissions.ts` dagi katalogdan olingan
   /// satrlar ("groups.manage", "signals.attach", ...).
   ///
@@ -325,14 +281,6 @@ model User {
 
   district District? @relation(fields: [districtId], references: [id], onDelete: SetNull)
 
-  /// ⚠️ `onDelete: SetNull`: tashkilot arxivlanadi, o'chirilmaydi —
-  /// lekin o'chirilsa ham xodim yozuvi (va uning auditdagi izi)
-  /// qolishi kerak.
-  organization Organization? @relation("OrgStaff", fields: [organizationId], references: [id], onDelete: SetNull)
-
-  orgDoneIssues    Issue[]             @relation("IssueOrgDoneBy")
-  createdOrgRoutes OrganizationRoute[] @relation("OrgRouteAuthor")
-
   officialGroups   TelegramGroup[]   @relation("GroupOfficialBy")
   guardedGroups    TelegramGroup[]   @relation("GroupGuardBy")
   attachedSignals  GroupSignal[]     @relation("SignalAttachedBy")
@@ -348,10 +296,6 @@ model User {
 
   @@index([role, isArchived])
   @@index([districtId])
-  /// ⚠️ XABARNOMA MANZILI SHU INDEKSDAN O'QILADI: tashkilotga
-  /// `telegramChatId` qo'yilmagan bo'lsa, xabar uning FAOL
-  /// xodimlariga ketadi (`issue-notify.service.ts`).
-  @@index([organizationId, isArchived])
   @@map("users")
 }
 
@@ -734,18 +678,6 @@ model IssueCategory {
 
   /// Mas'ul tashkilot nomi — ilovada "Mas'ul tashkilot" qatorida.
   /// Bo'sh bo'lsa ilova `Settings.orgName` ni ko'rsatadi.
-  ///
-  /// ⚠️ MATN, HAVOLA EMAS — VA SHUNDAY QOLADI. `Organization` jadvali
-  /// qo'shilgandan keyin ham bu ustun olib tashlanmaydi: u ZAXIRA.
-  /// Yo'naltirish qoidasi (`OrganizationRoute`) qo'yilmagan
-  /// yo'nalishda ilova baribir "Mas'ul tashkilot" qatorini
-  /// ko'rsatishi kerak, aks holda tizimga tashkilotlar kiritilmagan
-  /// paytda ekranda bo'sh joy turardi.
-  ///
-  /// ⚠️ IKKISI ARALASHTIRILMAYDI: `orgName` — fuqaroga ko'rinadigan
-  /// MATN, `Organization` — murojaat BORADIGAN manzil (hisobi,
-  /// xabarnomasi va yo'naltirish qoidasi bor). Qoida topilsa
-  /// tashkilotning haqiqiy nomi ko'rsatiladi, topilmasa shu matn.
   orgName String? @map("org_name")
 
   sortOrder Int @default(0) @map("sort_order")
@@ -776,11 +708,10 @@ model IssueCategory {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  parent    IssueCategory?      @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
-  children  IssueCategory[]     @relation("CategoryTree")
+  parent    IssueCategory?    @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  IssueCategory[]   @relation("CategoryTree")
   issues    Issue[]
   assignees MahallaAssignee[]
-  orgRoutes OrganizationRoute[]
 
   @@index([isActive, sortOrder])
   @@index([parentId, sortOrder])
@@ -866,46 +797,6 @@ model Issue {
   /// ── IJRO ────────────────────────────────────────────────────────
   assigneeId String? @map("assignee_id")
 
-  /// ── IJROCHI TASHKILOT ───────────────────────────────────────────
-  ///
-  /// ⚠️ `assigneeId` NING O'RNINI BOSMAYDI VA U BILAN
-  /// TO'QNASHMAYDI — ikkisi IKKI BOSHQA savolga javob beradi:
-  ///
-  ///   assigneeId     → muammoni NAZORAT qiladigan shtab xodimi
-  ///   organizationId → ishni BAJARADIGAN tashkilot (suv, gaz, yo'l)
-  ///
-  /// Ikkisi birga to'ladi va "qaysi biri ustun" degan savol paydo
-  /// bo'lmaydi. Bitta ustunga sig'dirilsa, "murojaat Suvoqovaga
-  /// ketdi, lekin uni shtabda kim kuzatyapti" degan savol javobsiz
-  /// qolardi.
-  ///
-  /// ⚠️ MUHRLANGAN NUSXA (`assigneeId`, `mahallaId` bilan ayni
-  /// qoida): yo'naltirish qoidasi keyin o'zgartirilsa, ALLAQACHON
-  /// yaratilgan murojaatning tashkiloti O'ZGARMAYDI. Aks holda
-  /// "o'tgan oy qaysi tashkilot nechta murojaat olgan" degan
-  /// hisobot jimgina qayta yozilardi.
-  ///
-  /// ⚠️ ESKI MUROJAATLARDA `null` VA U ORQAGA TO'LDIRILMAYDI: qoida
-  /// ular yaratilganda MAVJUD EMAS edi, ya'ni tashkilotga xabar ham
-  /// ketmagan. To'ldirilsa, panel "tashkilot xabardor" degan YOLG'ON
-  /// ko'rsatkich berardi.
-  organizationId String? @map("organization_id")
-
-  /// ── TASHKILOT "BAJARDIM" DEB BELGILAGANI ────────────────────────
-  ///
-  /// ⚠️ MUROJAATNI YOPMAYDI va holatni O'ZGARTIRMAYDI. Rasmiy
-  /// javobni (fuqaroning Telegram chatiga ketadigan matnni) shtab
-  /// xodimi yozadi: yuzlab tashkilot hisobiga aholiga to'g'ridan-
-  /// to'g'ri yozish huquqini berib bo'lmaydi va yuborilgan javobni
-  /// qaytarib ham bo'lmaydi (`broadcast.send` operatorga
-  /// berilmagani bilan AYNI sabab).
-  ///
-  /// ⚠️ SANA, BAYROQ EMAS: "qachon bajarildi" degan savol muddatga
-  /// rioya qilinganini tekshirish uchun kerak — `true`/`false` esa
-  /// buni aytmasdi.
-  orgDoneAt DateTime? @map("org_done_at")
-  orgDoneBy String?   @map("org_done_by")
-
   /// ⚠️ MUDDAT — MAJBURIYAT EMAS, MO'LJAL. Tizim uni o'tganda hech
   /// narsa qilmaydi (avtomatik eskalatsiya yo'q), faqat panelda
   /// ajratib ko'rsatadi. Avtomatik harakat qo'shilsa, u darhol
@@ -968,19 +859,17 @@ model Issue {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  category     IssueCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  duplicateOf  Issue?            @relation("IssueDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
-  duplicates   Issue[]           @relation("IssueDuplicates")
-  mahalla      Mahalla?          @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
-  author       User?             @relation("IssueAuthor", fields: [authorId], references: [id], onDelete: SetNull)
-  citizen      Citizen?          @relation(fields: [citizenId], references: [id], onDelete: SetNull)
-  assignee     User?             @relation("IssueAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  reviewer     User?             @relation("IssueReviewedBy", fields: [reviewedBy], references: [id], onDelete: SetNull)
-  organization Organization?     @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  orgDoneUser  User?             @relation("IssueOrgDoneBy", fields: [orgDoneBy], references: [id], onDelete: SetNull)
-  comments     IssueComment[]
-  attachments  IssueAttachment[]
-  signal       GroupSignal?
+  category    IssueCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  duplicateOf Issue?            @relation("IssueDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates  Issue[]           @relation("IssueDuplicates")
+  mahalla     Mahalla?          @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
+  author      User?             @relation("IssueAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  citizen     Citizen?          @relation(fields: [citizenId], references: [id], onDelete: SetNull)
+  assignee    User?             @relation("IssueAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  reviewer    User?             @relation("IssueReviewedBy", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  comments    IssueComment[]
+  attachments IssueAttachment[]
+  signal      GroupSignal?
 
   @@index([status, createdAt(sort: Desc)])
   @@index([mahallaId, status])
@@ -992,10 +881,6 @@ model Issue {
   /// ⚠️ Panel "shubhali" filtri — indekssiz butun jadval
   /// skanerlanardi.
   @@index([isSuspicious, createdAt(sort: Desc)])
-  /// ⚠️ TASHKILOT XODIMINING RO'YXATI — uning qamrovi aynan shu
-  /// ustun (`issueScopeWhere`). Indekssiz har kirishda butun
-  /// `issues` jadvali skanerlanardi.
-  @@index([organizationId, status])
   @@map("issues")
 }
 
@@ -1881,159 +1766,4 @@ model AnnouncementMedia {
 
   @@index([announcementId, sortOrder])
   @@map("announcement_media")
-}
-
-// ══════════════════════════════════════════════════════════════════════
-//  TASHKILOTLAR — MUROJAATNI BAJARADIGAN TOMON
-// ══════════════════════════════════════════════════════════════════════
-
-/// IJROCHI TASHKILOT — suv ta'minoti, gaz, yo'l, hokimlik bo'limi.
-///
-/// ── NIMA UCHUN ALOHIDA JADVAL ─────────────────────────────────────
-///
-/// ⚠️ AVVAL TASHKILOT FAQAT MATN EDI (`IssueCategory.orgName`):
-/// ilovada "Mas'ul tashkilot: Andijon suv ta'minoti" deb yozilardi,
-/// lekin bu MANZIL emasdi. Murojaat unga bormasdi, xabar ketmasdi va
-/// u panelga kira olmasdi — ya'ni "mas'ul" so'zi aholi uchun
-/// ko'rinish, tashkilot uchun esa hech narsa edi.
-///
-/// ⚠️ `User` + `MahallaAssignee` BILAN AYNI SHAKL: bu jadval —
-/// TOMON (kim), `OrganizationRoute` — QOIDA (qachon unga ketadi).
-/// Ikkisini bitta jadvalga qo'shsak, bir yo'nalishni bir necha
-/// tumanda bajaradigan tashkilot har tuman uchun QAYTA yozilardi va
-/// uning telefoni, hisobi, Telegram manzili nusxalanardi.
-///
-/// ⚠️ O'CHIRILMAYDI, ARXIVLANADI: unga yo'naltirilgan murojaatlar
-/// tarixi qoladi (`Issue.organizationId` — muhrlangan nusxa).
-model Organization {
-  id String @id @default(cuid())
-
-  /// ⚠️ `@unique`: "Asaka suv ta'minoti" ikki marta kiritilsa,
-  /// yo'naltirish qoidasi qaysi biriga tegishli ekani panelda
-  /// ko'rinmay qolardi — ikki qator bir xil nom bilan turardi.
-  name String @unique
-
-  /// Panelda jadval ustuniga sig'adigan qisqa nom ("Suvoqova").
-  shortName String? @map("short_name")
-
-  /// ── TUMAN ───────────────────────────────────────────────────────
-  ///
-  /// ⚠️ `null` — VILOYAT DARAJASIDAGI tashkilot ("Andijon viloyat
-  /// gaz ta'minoti"). Majburiy qilinsa, viloyat tashkilotini
-  /// kiritish uchun tasodifiy tuman tanlash kerak bo'lardi va u
-  /// hisobotda o'sha tumanning tashkiloti bo'lib ko'rinardi.
-  districtId String? @map("district_id")
-
-  /// Xodim qo'ng'iroq qilishi uchun (panelda ko'rinadi).
-  phone   String?
-  address String?
-
-  /// ── XABARNOMA MANZILI ───────────────────────────────────────────
-  ///
-  /// ⚠️ TASHKILOTNING O'Z CHATI (ish guruhi yoki rahbarining
-  /// shaxsiy chati). Bo'sh bo'lsa xabar uning FAOL xodimlarining
-  /// `User.telegramId` lariga ketadi (`issue-notify.service.ts`) —
-  /// ya'ni bitta manzil majburiy emas.
-  ///
-  /// ⚠️ MFY GURUHINING chat id'si QABUL QILINMAYDI (`TelegramGroup`
-  /// reyestriga qarshi tekshiriladi). Aks holda bot KUZATILADIGAN
-  /// guruhga yozib, "bot guruhda hech narsa yozmaydi" qoidasini
-  /// buzardi — va o'sha xabar keyingi tahlilda SIGNALGA aylanib
-  /// ketardi.
-  ///
-  /// ⚠️ `@unique`: bitta chat ikki tashkilotga qo'yilsa, u yerda
-  /// begona murojaatlar paydo bo'lardi.
-  telegramChatId String? @unique @map("telegram_chat_id")
-
-  /// ── BOTGA ULANISH KODI ──────────────────────────────────────────
-  ///
-  /// ⚠️ CHAT ID'NI PANELDA QO'LDA YOZIB BO'LMAYDI: oddiy odam o'z
-  /// chat id'sini bilmaydi va uni topish yo'li ham oson emas.
-  /// Shuning uchun panel KOD beradi, tashkilot esa botga
-  /// `/ulash <KOD>` deb yozadi — manzilni Telegram'ning O'ZI
-  /// aytadi (`message.from.id`), ya'ni xato yozish imkoni yo'q.
-  ///
-  /// ⚠️ BIR MARTALIK: ishlatilgandan keyin `null` ga tushadi. Qolsa,
-  /// kod tarqalgan holatda begona odam tashkilotning xabarnomalarini
-  /// o'z chatiga burib yuborardi.
-  linkCode String? @unique @map("link_code")
-
-  isActive   Boolean   @default(true) @map("is_active")
-  isArchived Boolean   @default(false) @map("is_archived")
-  archivedAt DateTime? @map("archived_at")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  district District?           @relation(fields: [districtId], references: [id], onDelete: SetNull)
-  routes   OrganizationRoute[]
-  /// ⚠️ TASHKILOT XODIMLARI — `User`, `scopeKind: org`.
-  users    User[]              @relation("OrgStaff")
-  issues   Issue[]
-
-  @@index([isArchived, name])
-  @@index([districtId, isArchived])
-  @@map("organizations")
-}
-
-/// YO'NALTIRISH QOIDASI — TUMAN × YO'NALISH → TASHKILOT.
-///
-/// ── NIMA UCHUN KALIT TUMAN, MFY EMAS ──────────────────────────────
-///
-/// ⚠️ `MahallaAssignee` MFY × YO'NALISH bo'yicha ishlaydi va u shtab
-/// XODIMI uchun to'g'ri: bitta operator o'n MFY ni yuritadi. Tashkilot
-/// esa tuman darajasida ishlaydi — "Asaka suv ta'minoti" o'sha
-/// tumanning HAMMA mahallasiga xizmat qiladi. MFY bo'yicha kalit
-/// qo'yilsa, 500 MFY × 22 yo'nalish = 11 000 qatorni QO'LDA to'ldirish
-/// kerak bo'lardi va tizim o'sha ish bitmaguncha ishlamasdi.
-///
-/// ⚠️ `districtId: null` — VILOYAT ZAXIRASI: tumaniga aniq qoida
-/// qo'yilmagan murojaat shu qoidaga tushadi. Ya'ni 22 ta viloyat
-/// qatori butun viloyatni DARHOL ishga tushiradi, keyin tumanlar
-/// birma-bir aniqlashtiriladi.
-///
-/// ⚠️ `@@unique([categoryId, districtId])` — bitta (yo'nalish, tuman)
-/// juftligiga BITTA tashkilot (`MahallaAssignee` dagi ayni sabab):
-/// ikkitasi bo'lsa "qaysi biri" degan savol har murojaatda TASODIFIY
-/// hal bo'lardi.
-///
-/// ⚠️ LEKIN BU CHEKLOV VILOYAT ZAXIRASINI (`districtId: null`)
-/// HIMOYA QILMAYDI: PostgreSQL `UNIQUE` da `NULL` larni BIR-BIRIGA
-/// TENG DEB HISOBLAMAYDI, ya'ni ayni yo'nalish uchun ikkita viloyat
-/// qatori bazaga jim o'tib ketardi. Qisman indeks (`WHERE
-/// district_id IS NULL`) Prisma sxemasida ifodalanmaydi va qo'lda
-/// yozilsa keyingi `migrate dev` uni O'CHIRIB tashlardi — ya'ni
-/// himoya bir kuni jimgina yo'qolardi.
-///
-/// Shuning uchun tekshiruv XIZMATDA (`organizations.service.ts#
-/// saveRoute`), va qidiruv TARTIBI aniq (`resolve` da `createdAt`
-/// bo'yicha): tasodifan ikkita qator paydo bo'lsa ham, qaysi biri
-/// ishlayotgani tushuntirib beriladigan bo'lib qoladi.
-///
-/// ⚠️ HAQIQIY O'CHIRISH, `isActive: false` EMAS: qoida — SOZLAMA,
-/// dalil emas. "Kim qachon qo'ygan" javobi `AuditLog` da qoladi.
-model OrganizationRoute {
-  id String @id @default(cuid())
-
-  organizationId String @map("organization_id")
-  categoryId     String @map("category_id")
-
-  /// `null` — viloyat bo'ylab zaxira (yuqoridagi izoh).
-  districtId String? @map("district_id")
-
-  isActive Boolean @default(true) @map("is_active")
-
-  createdBy String?  @map("created_by")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  category     IssueCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  district     District?     @relation(fields: [districtId], references: [id], onDelete: Cascade)
-  author       User?         @relation("OrgRouteAuthor", fields: [createdBy], references: [id], onDelete: SetNull)
-
-  @@unique([categoryId, districtId])
-  @@index([organizationId])
-  @@index([districtId])
-  @@map("organization_routes")
 }

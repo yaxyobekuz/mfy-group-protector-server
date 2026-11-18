@@ -94,15 +94,6 @@ export class UsersService {
           lastLoginAt: true,
           createdAt: true,
           district: { select: { id: true, name: true } },
-          /**
-           * ⚠️ TASHKILOT HISOBLARI HAM SHU RO'YXATDA KO'RINADI
-           * (viloyat qamrovli adminga): ular haqiqiy hisob va
-           * ularni yashirish "panelga kira oladigan, lekin
-           * ro'yxatda yo'q" hisoblarni yaratardi. Nomi
-           * ko'rsatiladi, aks holda "qamrov: Tashkilot" degan
-           * yorliq QAYSI tashkilot ekanini aytmasdi.
-           */
-          organization: { select: { id: true, name: true } },
           _count: { select: { assignedIssues: true } },
         },
         // ⚠️ `passwordHash` TANLANMAYDI. `select` ishlatilgani
@@ -116,7 +107,7 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto, scope: ScopeContext) {
-    this.assertScopeFields(dto.scopeKind, dto.districtId ?? null, dto.scopeKind);
+    this.assertScopeFields(dto.scopeKind, dto.districtId ?? null);
 
     // ⚠️ `owner` YARATILMAYDI panel orqali: u seed bilan bir marta
     // paydo bo'ladi. Aks holda admin o'ziga owner yasab, butun
@@ -202,7 +193,7 @@ export class UsersService {
     const districtId =
       dto.districtId !== undefined ? dto.districtId : existing.districtId;
 
-    this.assertScopeFields(scopeKind, districtId, dto.scopeKind);
+    this.assertScopeFields(scopeKind, districtId);
 
     if (!isProvinceWide(scope) && scopeKind === ScopeKind.province) {
       throw new ForbiddenException("Viloyat qamrovini berish sizning huquqingizda emas");
@@ -353,42 +344,10 @@ export class UsersService {
    * qo'yishdan ko'ra xavfsizroq, lekin uni bu yerda ushlash
    * yaxshiroq.
    */
-  private assertScopeFields(
-    scopeKind: ScopeKind,
-    districtId: string | null,
-    /**
-     * MIJOZ AYNI SO'ROVDA SO'RAGAN qamrov (`dto.scopeKind`).
-     *
-     * ⚠️ HAL QILINGAN QIYMAT (`dto.scopeKind ?? existing.scopeKind`)
-     * BILAN TEKSHIRILMAYDI: o'shanda mavjud tashkilot hisobining
-     * ismini tahrirlash ham rad etilardi — holbuki taqiq "org"
-     * qamrovini BU YERDAN BERISHGA tegishli, mavjudini
-     * boshqarishga emas.
-     */
-    requestedScopeKind?: ScopeKind,
-  ): void {
+  private assertScopeFields(scopeKind: ScopeKind, districtId: string | null): void {
     if (scopeKind === ScopeKind.district && !districtId) {
       throw new BadRequestException(
         "Tuman qamrovi uchun tuman ko'rsatilishi shart — aks holda xodim hech narsa ko'rmaydi",
-      );
-    }
-
-    /**
-     * ⚠️ TASHKILOT QAMROVI BU YERDAN BERILMAYDI. Tashkilot hisobi
-     * `Organization` bilan BIRGA yaratiladi (`POST
-     * /organizations/:id/login`) — chunki `organizationId` siz
-     * `org` qamrovli xodim HECH NARSA ko'rmaydi
-     * (`issueScopeWhere` uni o'z tashkilotining murojaatlari
-     * bilan cheklaydi va tashkilot `null` bo'lsa natija bo'sh).
-     *
-     * ⚠️ XODIMLAR SAHIFASIDA BU QIYMATNI TANLASH IMKONI BO'LSA,
-     * admin "org" ni tanlab, tashkilotni ko'rsatmay qo'yardi va
-     * yangi hisob jimgina ishlamas hisob bo'lib qolardi —
-     * panelda esa hammasi joyidek ko'rinardi.
-     */
-    if (requestedScopeKind === ScopeKind.org) {
-      throw new BadRequestException(
-        "Tashkilot qamrovli hisob Tashkilotlar bo'limida yaratiladi — u yerda tashkilot ham birga tanlanadi",
       );
     }
   }

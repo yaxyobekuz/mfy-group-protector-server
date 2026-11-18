@@ -13,7 +13,6 @@ import { Body, Controller, Headers, HttpCode, Post, Get } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
 import {
-  AllowPendingPassword,
   ClientIp,
   CurrentUser,
   Public,
@@ -21,7 +20,7 @@ import {
 } from "../../common/decorators";
 import { THROTTLE } from "../../common/throttle";
 import { AuthService } from "./auth.service";
-import { ChangePasswordDto, LoginDto, RefreshDto } from "./dto/auth.dto";
+import { LoginDto, RefreshDto } from "./dto/auth.dto";
 
 @Controller("auth")
 export class AuthController {
@@ -82,42 +81,8 @@ export class AuthController {
    * o'zgarganda panel DARHOL yangi ro'yxatni oladi (`JwtAuthGuard`
    * ham bazadan o'qiydi — ayni mantiq).
    */
-  /**
-   * ⚠️ PAROL ALMASHTIRILMAGAN BO'LSA HAM ISHLAYDI: panel
-   * `mustChangePassword` ni aynan shu javobdan biladi va usiz
-   * foydalanuvchi "nimadir xato" degan ekranda qolardi.
-   */
-  @AllowPendingPassword()
   @Get("me")
   me(@CurrentUser() user: RequestUser) {
     return user;
-  }
-
-  /**
-   * O'Z PAROLINI ALMASHTIRISH.
-   *
-   * ⚠️ RUXSAT TALAB QILINMAYDI (`@RequirePermissions` YO'Q): o'z
-   * parolini har kim almashtirishi kerak va tashkilot xodimida
-   * `users.manage` yo'q. Himoya — ESKI PAROL
-   * (`auth.service.ts#changePassword`).
-   *
-   * ⚠️ `THROTTLE.AUTH` BILAN: bu yerda ham parol tekshiriladi,
-   * ya'ni token o'g'irlangan holatda eski parolni sinab ko'rish
-   * yo'li bo'lardi.
-   */
-  @AllowPendingPassword()
-  @Throttle({ [THROTTLE.AUTH]: {} })
-  @Post("change-password")
-  @HttpCode(200)
-  changePassword(
-    @CurrentUser() user: RequestUser,
-    @Body() dto: ChangePasswordDto,
-    @ClientIp() ip: string | null,
-    @Headers("user-agent") userAgent?: string,
-  ) {
-    return this.auth.changePassword(user.id, dto.currentPassword, dto.newPassword, {
-      ip,
-      userAgent,
-    });
   }
 }

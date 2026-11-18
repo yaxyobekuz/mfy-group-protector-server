@@ -29,9 +29,8 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../../common/audit.service";
 import {
   canTouchDistrict,
-  isOrgScope,
   isProvinceWide,
-  issueScopeWhere,
+  mahallaScopeWhere,
   type ScopeContext,
 } from "../../common/scope.util";
 import { paginate, type Paginated } from "../../common/dto/pagination.dto";
@@ -39,11 +38,9 @@ import { POINTS } from "../../common/points";
 import {
   IssueSource,
   IssueStatus,
-  ScopeKind,
   type IssuePriority,
   type Prisma,
 } from "@prisma/client";
-import { OrgRoutingService } from "../organizations/org-routing.service";
 import { AssignmentRulesService } from "./assignment-rules.service";
 import { IssueNotifyService } from "./issue-notify.service";
 import type {
@@ -69,14 +66,6 @@ export class IssuesService {
     private readonly audit: AuditService,
     private readonly notify: IssueNotifyService,
     private readonly rules: AssignmentRulesService,
-    /**
-     * ⚠️ YO'NALTIRISH QOIDASI ALOHIDA XIZMATDA
-     * (`organizations` moduli): u `MahallaAssignee` dan BOSHQA
-     * kalit bo'yicha ishlaydi (tuman × yo'nalish) va uni shu
-     * yerga ko'chirish ikki qoidani bir tanaga qo'shib,
-     * "qaysi biri ustun" degan soxta savolni tug'dirardi.
-     */
-    private readonly orgRouting: OrgRoutingService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════
@@ -129,16 +118,7 @@ export class IssuesService {
       category.slaHours,
     );
 
-    /**
-     * ⚠️ TASHKILOTGA YO'NALTIRISH SIGNALDAN KELGANDA HAM ISHLAYDI:
-     * guruhdagi "suv yo'q" xabari ham, ilovadan kelgan murojaat ham
-     * AYNI tashkilotga tegishli. Boshqacha qilinsa, "ilovadan
-     * kelgani Suvoqovaga ketdi, guruhdan kelgani esa shtabda
-     * qoldi" degan ajralish paydo bo'lardi.
-     */
-    const org = await this.orgRouting.resolve(input.mahallaId, input.categoryId);
-
-    const issue = await tx.issue.create({
+    return tx.issue.create({
       data: {
         publicNo: await this.nextPublicNo(tx),
         categoryId: input.categoryId,
@@ -149,23 +129,12 @@ export class IssuesService {
         priority: input.priority,
         authorId: input.authorId,
         sourceMeta: input.sourceMeta,
-        organizationId: org?.organizationId ?? null,
         ...(auto
           ? { assigneeId: auto.assigneeId, dueAt: auto.dueAt, dueSource: "rule" }
           : {}),
       },
       select: { id: true, publicNo: true },
     });
-
-    /**
-     * ⚠️ XABARNOMA TRANZAKSIYADAN KEYIN EMAS, LEKIN UNI KUTMAYDI
-     * HAM (`void`): Telegram so'rovi tranzaksiya ichida kutilsa,
-     * baza ulanishi xabar yuborilguncha band bo'lib turardi — va
-     * Telegram javob bermasa, tranzaksiya ham osilib qolardi.
-     */
-    if (org) void this.notifyOrganization(issue.id);
-
-    return issue;
   }
 
   /** PANELDA QO'LDA YARATADI. */
@@ -201,14 +170,6 @@ export class IssuesService {
       ? null
       : await this.rules.fieldsFor(dto.mahallaId, dto.categoryId, category.slaHours);
 
-    /**
-     * ⚠️ PANELDA QO'LDA YARATILGAN MUROJAAT HAM TASHKILOTGA
-     * YO'NALTIRILADI: xodim telefon orqali kelgan shikoyatni
-     * panelga kiritadi va u ham o'sha tashkilotning ishi.
-     * Yo'naltirilmasa, oqim manbaga qarab ikkiga bo'linardi.
-     */
-    const org = await this.orgRouting.resolve(dto.mahallaId, dto.categoryId);
-
     const issue = await this.prisma.issue.create({
       data: {
         publicNo: await this.nextPublicNo(this.prisma),
@@ -227,13 +188,10 @@ export class IssuesService {
         dueSource: dto.dueAt ? "manual" : auto ? "rule" : null,
         authorId: scope.userId,
         assigneeId: dto.assigneeId ?? auto?.assigneeId ?? null,
-        organizationId: org?.organizationId ?? null,
         sourceMeta: { channel: "panel" },
       },
       select: { id: true, publicNo: true },
     });
-
-    if (org) void this.notifyOrganization(issue.id);
 
     await this.audit.record({
       userId: scope.userId,
@@ -246,110 +204,6 @@ export class IssuesService {
     return issue;
   }
 
-  /**
-   * TASHKILOTGA XABARNOMA — YANGI MUROJAAT.
-   *
-   * ⚠️ BITTA JOYDA, UCHALA OQIM UCHUN: murojaat panel, signal va
-   * ilova/bot orqali yaratiladi va "kimga yuborilmaydi" qoidalari
-   * uchalasida AYNI bo'lishi kerak. Har yaratish joyida
-   * takrorlansa, bittasi albatta eskirardi va o'sha yo'ldan
-   * kelgan murojaat tashkilotga yigirma marta xabar yuborardi.
-   *
-   * ⚠️ `void` BILAN CHAQIRILADI (natija kutilmaydi): Telegram
-   * so'rovi sekin bo'lishi mumkin va fuqaro "yuborildi" javobini
-   * xabar ketishini kutib turmasligi kerak. Xato ham yuqoriga
-   * chiqmaydi (`issue-notify.service.ts` doktrinasi).
-   */
-  async notifyOrganization(issueId: string): Promise<void> {
-    try {
-      const issue = await this.prisma.issue.findUnique({
-        where: { id: issueId },
-        select: {
-          publicNo: true,
-          body: true,
-          address: true,
-          dueAt: true,
-          duplicateOfId: true,
-          isSuspicious: true,
-          category: { select: { name: true } },
-          mahalla: {
-            select: { name: true, district: { select: { name: true } } },
-          },
-          organization: {
-            select: {
-              id: true,
-              telegramChatId: true,
-              isActive: true,
-              isArchived: true,
-              users: {
-                where: { isArchived: false, isActive: true, telegramId: { not: null } },
-                select: { telegramId: true },
-              },
-            },
-          },
-        },
-      });
-
-      if (!issue?.organization) return;
-      if (!issue.organization.isActive || issue.organization.isArchived) return;
-
-      /**
-       * ⚠️ TAKRORIY MUROJAATDA XABAR YUBORILMAYDI. Transformator
-       * o'chganda 20 kishi "svet yo'q" deb yozadi va asosiysiga
-       * xabar ALLAQACHON ketgan — qolgan 19 tasi uchun ayni xabar
-       * yuborilsa, tashkilotning chati bir hodisa tufayli
-       * to'lib ketardi va keyingi HAQIQIY xabar ko'rinmay
-       * qolardi.
-       */
-      if (issue.duplicateOfId !== null) return;
-
-      /**
-       * ⚠️ SHUBHALI MUROJAATDA HAM YUBORILMAYDI: matni fuqaroning
-       * o'z ismi bo'lgan yoki mazmunsiz murojaat tashkilotga
-       * ketsa, uni HAL QILIB BO'LMASDI — tashkilot esa "bu nima"
-       * deb shtabga qayta qo'ng'iroq qilardi. Murojaat panelda
-       * turadi va xodim uni ko'rib chiqadi
-       * (`appeal-triage.service.ts` — "faqat belgilaydi, rad
-       * etmaydi").
-       */
-      if (issue.isSuspicious) return;
-
-      /**
-       * ⚠️ MANZIL IKKI MANBADAN: avval tashkilotning O'Z chati
-       * (ish guruhi), u bo'lmasa xodimlarining shaxsiy chatlari.
-       * Ikkisi BIRGA yuborilmaydi — o'shanda rahbar ayni xabarni
-       * guruhda ham, shaxsiy chatida ham olardi.
-       *
-       * ⚠️ `telegramId` BO'LMASA JIM O'TADI: tashkilot hali botga
-       * ulanmagan bo'lishi mumkin va bu XATO EMAS — murojaat
-       * panelda baribir ko'rinadi (`citizens.service.ts` dagi
-       * tarqatma filtri bilan ayni qoida).
-       */
-      const chatIds = issue.organization.telegramChatId
-        ? [issue.organization.telegramChatId]
-        : issue.organization.users
-            .map((user) => user.telegramId)
-            .filter((id): id is string => id !== null);
-
-      if (chatIds.length === 0) return;
-
-      await this.notify.sendOrgAssignment({
-        chatIds,
-        publicNo: issue.publicNo,
-        categoryName: issue.category.name,
-        mahallaName: issue.mahalla?.name ?? null,
-        districtName: issue.mahalla?.district.name ?? null,
-        address: issue.address,
-        body: issue.body,
-        dueAt: issue.dueAt,
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Tashkilotga xabarnoma yuborilmadi (${issueId}): ${(error as Error).message}`,
-      );
-    }
-  }
-
   // ═══════════════════════════════════════════════════════════════
   //  O'QISH
   // ═══════════════════════════════════════════════════════════════
@@ -358,13 +212,7 @@ export class IssuesService {
     const where = {
       // ⚠️ `includeUnassigned`: hududi qo'yilmagan muammo (botdan
       // kelgani) ko'rinishi kerak — aks holda u jim turib qolardi.
-      /**
-       * ⚠️ `issueScopeWhere`, `mahallaScopeWhere` EMAS: tashkilot
-       * xodimi uchun qamrov HUDUDIY emas — u o'z tashkilotiga
-       * yo'naltirilgan murojaatlarni ko'radi (`scope.util.ts`).
-       * Qolgan hamma xodim uchun natija AVVALGIDEK.
-       */
-      ...issueScopeWhere(scope, { includeUnassigned: isProvinceWide(scope) }),
+      ...mahallaScopeWhere(scope, { includeUnassigned: isProvinceWide(scope) }),
       ...(query.status ? { status: query.status } : {}),
       ...(query.priority ? { priority: query.priority } : {}),
       ...(query.source ? { source: query.source } : {}),
@@ -378,7 +226,7 @@ export class IssuesService {
        * foydalanuvchi sababini topa olmasdi.
        *
        * ⚠️ QAMROV USTIDAN O'TMAYDI: bu `where` ga QO'SHILADI
-       * (`issueScopeWhere` yuqorida) — tuman xodimi boshqa
+       * (`mahallaScopeWhere` yuqorida) — tuman xodimi boshqa
        * tumanni so'rasa ham AND sharti uni bo'sh qaytaradi.
        */
       ...(query.mahallaId
@@ -387,13 +235,6 @@ export class IssuesService {
           ? { mahalla: { districtId: query.districtId } }
           : {}),
       ...(query.assigneeId ? { assigneeId: query.assigneeId } : {}),
-      /**
-       * ⚠️ QAMROV USTIDAN O'TMAYDI: bu `where` ga QO'SHILADI
-       * (`issueScopeWhere` yuqorida) — tashkilot xodimi begona
-       * tashkilotni so'rasa ham AND sharti ro'yxatni bo'sh
-       * qaytaradi.
-       */
-      ...(query.organizationId ? { organizationId: query.organizationId } : {}),
       // ⚠️ `overdue` — MUDDATI O'TGAN VA HALI YOPILMAGAN. Yopilgan
       // muammoning muddati o'tgani ahamiyatsiz: u allaqachon hal
       // qilingan.
@@ -431,8 +272,6 @@ export class IssuesService {
             select: { id: true, name: true, district: { select: { id: true, name: true } } },
           },
           assignee: { select: { id: true, firstName: true, lastName: true } },
-          /** ⚠️ Ro'yxatda ham ko'rinadi: "bu kimning ishi" degan savol. */
-          organization: { select: { id: true, name: true, shortName: true } },
           author: { select: { id: true, firstName: true, lastName: true } },
           citizen: { select: { id: true, firstName: true, lastName: true } },
           // ⚠️ TAKRORIYLAR SONI RO'YXATDA KO'RINADI: "bu bitta
@@ -456,19 +295,6 @@ export class IssuesService {
       category: issue.category,
       mahalla: issue.mahalla,
       assignee: issue.assignee,
-      /**
-       * ⚠️ QISQA NOM USTUN TURADI: "Andijon viloyat suv ta'minoti
-       * boshqarmasi" jadval ustuniga sig'maydi va qator ikki
-       * qatorga bo'linib, ro'yxat o'qilmaydigan bo'lib qolardi.
-       */
-      organization: issue.organization
-        ? {
-            id: issue.organization.id,
-            name: issue.organization.shortName ?? issue.organization.name,
-          }
-        : null,
-      /** ⚠️ Tashkilot bajardi, lekin murojaat hali YOPILMAGAN. */
-      orgDoneAt: issue.orgDoneAt,
       author: issue.author,
       // ⚠️ MOBIL MUROJAATDA MUALLIF FUQARO: panel `source==="mobile"`
       // da shuni ko'rsatadi.
@@ -519,22 +345,6 @@ export class IssuesService {
           },
         },
         assignee: { select: { id: true, firstName: true, lastName: true } },
-        /**
-         * ⚠️ IJROCHI TASHKILOT — `assignee` NING O'RNINI BOSMAYDI:
-         * biri ishni BAJARADI, ikkinchisi shtabda KUZATADI
-         * (schema'dagi izoh). Panel ikkisini yonma-yon
-         * ko'rsatadi.
-         */
-        organization: {
-          select: {
-            id: true,
-            name: true,
-            shortName: true,
-            phone: true,
-            district: { select: { id: true, name: true } },
-          },
-        },
-        orgDoneUser: { select: { id: true, firstName: true, lastName: true } },
         author: { select: { id: true, firstName: true, lastName: true } },
         // ⚠️ MOBIL MUROJAAT MUALLIFI — FUQARO (`citizenId`), xodim emas.
         // Panel uni "Yuborgan" sifatida ko'rsatadi.
@@ -576,18 +386,13 @@ export class IssuesService {
     });
     if (!issue) throw new NotFoundException("Muammo topilmadi");
 
-    this.assertScope(
-      scope,
-      issue.mahalla?.district.id ?? null,
-      issue.mahallaId,
-      issue.organizationId,
-    );
+    this.assertScope(scope, issue.mahalla?.district.id ?? null, issue.mahallaId);
 
     return issue;
   }
 
   async getStats(scope: ScopeContext) {
-    const scopeWhere = issueScopeWhere(scope, {
+    const scopeWhere = mahallaScopeWhere(scope, {
       includeUnassigned: isProvinceWide(scope),
     });
 
@@ -637,7 +442,7 @@ export class IssuesService {
     if (dto.assigneeId) {
       const assignee = await this.prisma.user.findUnique({
         where: { id: dto.assigneeId },
-        select: { id: true, isActive: true, isArchived: true, scopeKind: true },
+        select: { id: true, isActive: true, isArchived: true },
       });
       if (!assignee) throw new NotFoundException("Xodim topilmadi");
 
@@ -645,19 +450,6 @@ export class IssuesService {
       // va muammo jimgina hech kim ko'rmaydigan joyda qolib ketardi.
       if (assignee.isArchived || !assignee.isActive) {
         throw new BadRequestException("Bu xodim faol emas");
-      }
-
-      /**
-       * ⚠️ TASHKILOT XODIMIGA TOPSHIRILMAYDI (`assignment-rules.
-       * service.ts#save` dagi ayni tekshiruv): uning qamrovi
-       * `organizationId` bo'yicha, ya'ni `assigneeId` ga
-       * qo'yilgan murojaat uning ro'yxatida ko'rinmaydi —
-       * panelda esa "ijrochi belgilangan" bo'lib turardi.
-       */
-      if (assignee.scopeKind === ScopeKind.org) {
-        throw new BadRequestException(
-          "Tashkilot xodimi ijrochi qilib belgilanmaydi — murojaat unga yo'naltirish qoidasi orqali boradi",
-        );
       }
     }
 
@@ -915,26 +707,12 @@ export class IssuesService {
   async addComment(id: string, dto: AddCommentDto, scope: ScopeContext) {
     const issue = await this.loadForWrite(id, scope);
 
-    /**
-     * ⚠️ TASHKILOT XODIMI OMMAVIY IZOH YOZA OLMAYDI va bu
-     * `issues.resolve` berilmagani bilan AYNI qoida: `isPublic`
-     * izoh fuqaroning Telegram chatiga XABAR bo'lib ketadi, ya'ni
-     * u rasmiy javobning yashirin yo'li bo'lardi. Yuzlab tashkilot
-     * hisobiga aholiga to'g'ridan-to'g'ri yozish huquqi berilmaydi
-     * — yuborilgan xabarni qaytarib bo'lmaydi.
-     *
-     * ⚠️ IZOHNING O'ZI TAQIQLANMAYDI: ichki izoh aynan shu yerda
-     * kerak ("nasos almashtirildi, 14:00 da suv berildi") va
-     * shtab xodimi javobni o'sha izohga tayanib yozadi.
-     */
-    const isPublic = isOrgScope(scope) ? false : (dto.isPublic ?? false);
-
     const comment = await this.prisma.issueComment.create({
       data: {
         issueId: id,
         userId: scope.userId,
         body: dto.body.trim(),
-        isPublic,
+        isPublic: dto.isPublic ?? false,
       },
       include: { user: { select: { id: true, firstName: true, lastName: true } } },
     });
@@ -954,56 +732,6 @@ export class IssuesService {
     return comment;
   }
 
-  /**
-   * TASHKILOT "BAJARDIM" DEB BELGILAYDI.
-   *
-   * ⚠️ MUROJAATNI YOPMAYDI VA HOLATNI O'ZGARTIRMAYDI. Rasmiy
-   * javobni shtab xodimi yozadi — bu belgi uning uchun SIGNAL:
-   * "ish bajarildi, javob yozishingiz mumkin". Holatni
-   * `resolved` qilsa, fuqaroga javobsiz "hal qilindi" degan
-   * xabar ketardi yoki javob umuman yozilmay qolardi.
-   *
-   * ⚠️ SHTAB XODIMI HAM BELGILAY OLADI (telefon orqali
-   * bajarilganini bilsa): amal `issues.view` dan boshqa ruxsat
-   * talab qilmaydi, lekin qamrov baribir tekshiriladi
-   * (`loadForWrite`). Faqat tashkilotga qoldirilsa, botga
-   * ulanmagan tashkilotning ishi panelda abadiy "bajarilmagan"
-   * bo'lib turardi.
-   *
-   * ⚠️ YOPILGAN MUROJAATDA MA'NOSIZ: javob allaqachon berilgan va
-   * belgi hech narsani o'zgartirmasdi.
-   */
-  async markOrgDone(id: string, done: boolean, scope: ScopeContext) {
-    const issue = await this.loadForWrite(id, scope);
-
-    if (CLOSED_STATUSES.includes(issue.status)) {
-      throw new BadRequestException("Murojaat allaqachon yopilgan");
-    }
-
-    if (!issue.organizationId) {
-      throw new BadRequestException("Bu murojaat tashkilotga yo'naltirilmagan");
-    }
-
-    const updated = await this.prisma.issue.update({
-      where: { id },
-      data: {
-        orgDoneAt: done ? new Date() : null,
-        orgDoneBy: done ? scope.userId : null,
-      },
-      select: { id: true, orgDoneAt: true },
-    });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: done ? "issue.org_done" : "issue.org_done.undo",
-      entity: "Issue",
-      entityId: id,
-      meta: { publicNo: issue.publicNo },
-    });
-
-    return updated;
-  }
-
   // ───────────────────────────────────────────────────────────────
 
   /** Yozishdan oldin yuklaydi va qamrovni tekshiradi. */
@@ -1016,9 +744,6 @@ export class IssuesService {
         status: true,
         assigneeId: true,
         mahallaId: true,
-        /** ⚠️ Tashkilot xodimining qamrovi aynan shu ustun. */
-        organizationId: true,
-        orgDoneAt: true,
         authorChatId: true,
         citizenId: true,
         // ⚠️ MOBIL MUROJAATDA `authorChatId` NULL: javob fuqaroning
@@ -1030,12 +755,7 @@ export class IssuesService {
     });
     if (!issue) throw new NotFoundException("Muammo topilmadi");
 
-    this.assertScope(
-      scope,
-      issue.mahalla?.districtId ?? null,
-      issue.mahallaId,
-      issue.organizationId,
-    );
+    this.assertScope(scope, issue.mahalla?.districtId ?? null, issue.mahallaId);
 
     return issue;
   }
@@ -1068,22 +788,7 @@ export class IssuesService {
     scope: ScopeContext,
     districtId: string | null,
     mahallaId: string | null,
-    organizationId: string | null = null,
   ): void {
-    /**
-     * ⚠️ TASHKILOT XODIMI HUDUD BO'YICHA TEKSHIRILMAYDI: viloyat
-     * darajasidagi tashkilotga istalgan tumandan murojaat kelishi
-     * mumkin va u o'z murojaatini ko'rishi SHART. Tekshiruv esa
-     * `organizationId` ustida — ya'ni begona tashkilotning
-     * murojaati unga baribir ochilmaydi (`canTouchIssue`).
-     */
-    if (isOrgScope(scope)) {
-      if (organizationId !== scope.organizationId) {
-        throw new ForbiddenException("Bu murojaat sizning tashkilotingizga yo'naltirilmagan");
-      }
-      return;
-    }
-
     if (isProvinceWide(scope)) return;
 
     // ⚠️ HUDUDI QO'YILMAGAN MUAMMO (botdan kelgani) — faqat VILOYAT

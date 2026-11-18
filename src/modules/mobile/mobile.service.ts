@@ -36,7 +36,6 @@ import { POINTS } from "../../common/points";
 import { SECRET_CONTEXT, openSecret } from "../../common/secret-box";
 import { signRef, verifyRef } from "../../common/signed-ref";
 import { AppealTriageService } from "../issues/appeal-triage.service";
-import { OrgRoutingService } from "../organizations/org-routing.service";
 import { AssignmentRulesService } from "../issues/assignment-rules.service";
 import { IssuesService } from "../issues/issues.service";
 import { UploadsService } from "../uploads/uploads.service";
@@ -89,13 +88,6 @@ export class MobileService {
     private readonly prisma: PrismaService,
     private readonly issues: IssuesService,
     private readonly rules: AssignmentRulesService,
-    /**
-     * ⚠️ TASHKILOTGA YO'NALTIRISH — ALOHIDA QOIDA: `rules` MFY ×
-     * yo'nalish bo'yicha SHTAB XODIMINI topadi, bu esa tuman ×
-     * yo'nalish bo'yicha IJROCHI TASHKILOTNI. Ikkisi boshqa
-     * ustunni to'ldiradi va birga ishlaydi.
-     */
-    private readonly orgRouting: OrgRoutingService,
     private readonly triage: AppealTriageService,
     private readonly uploads: UploadsService,
     private readonly ai: MobileAiService,
@@ -545,14 +537,6 @@ export class MobileService {
       where: { id, citizenId },
       include: {
         category: { select: { id: true, name: true, color: true, icon: true, orgName: true } },
-        /**
-         * ⚠️ MUHRLANGAN TASHKILOT — jonli qoidadan EMAS. Fuqaro
-         * murojaatini ochganda uning tashkiloti o'sha paytdagi
-         * qiymat bo'lishi kerak: qoida keyin o'zgarsa, ekranda
-         * "sizning murojaatingiz X ga ketdi" degan yozuv
-         * jimgina boshqa tashkilotga aylanib ketardi.
-         */
-        organization: { select: { name: true, shortName: true } },
         mahalla: { select: { name: true } },
         attachments: {
           select: { id: true, kind: true, path: true, mimeType: true },
@@ -592,8 +576,7 @@ export class MobileService {
         name: issue.category.name,
         color: issue.category.color,
         icon: issue.category.icon,
-        /** ⚠️ Muhrlangan tashkilot ustun, yo'nalishdagi matn — zaxira. */
-        orgName: issue.organization?.name ?? issue.category.orgName,
+        orgName: issue.category.orgName,
       },
       mahallaName: issue.mahalla?.name ?? null,
       districtName: null,
@@ -644,27 +627,7 @@ export class MobileService {
   //  AI TAKLIFI
   // ─────────────────────────────────────────────────────────────────
 
-  /**
-   * ⚠️ TASHKILOTNI AI TANLAMAYDI — QOIDA TANLAYDI. Fuqaroga
-   * ko'rsatiladigan "Mas'ul tashkilot" qatori modelning TAXMINI
-   * emas, `OrganizationRoute` dagi aniq javob (tuman × yo'nalish).
-   * Modeldan "qaysi tashkilot" deb so'ralsa, u ro'yxatda yo'q
-   * nomni o'ylab topishi mumkin edi — va fuqaro ekranda SOXTA
-   * manzilni ko'rardi, murojaat esa butunlay boshqa joyga
-   * ketardi.
-   *
-   * ⚠️ IKKINCHI AI CHAQIRUVI QO'SHILMAYDI: shlyuz bitta va u
-   * hozir sekin ishlayapti — qo'shimcha chaqiruv sehrgarni yana
-   * 30 soniyaga cho'zardi, holbuki javob BAZADA aniq turibdi.
-   *
-   * ⚠️ TASHKILOT IMZOLANGAN HAVOLAGA QO'SHILMAYDI (`SignedAi`):
-   * imzo MIJOZ qaytaradigan qiymatlar uchun kerak, bu esa
-   * ko'rsatish uchun o'qiladi va murojaat yaratilganda server
-   * qoidadan QAYTA o'qiydi (`create`). Imzoga qo'shilsa,
-   * yo'naltirish qoidasi oradagi vaqtda o'zgarsa, eski taklif
-   * bo'yicha yozilgan murojaat NOTO'G'RI tashkilotga ketardi.
-   */
-  async analyze(dto: AnalyzeDto, citizenId: string) {
+  async analyze(dto: AnalyzeDto) {
     const categories = await this.prisma.issueCategory.findMany({
       where: { isActive: true },
       select: {
@@ -712,19 +675,6 @@ export class MobileService {
     const category = categories.find((c) => c.id === suggestion.categoryId);
     if (!category) return { suggestion: null, token: null };
 
-    /**
-     * ⚠️ HUDUD FUQARONING PROFILIDAN: taklif bosqichida u hali MFY
-     * ko'rsatmagan bo'lishi mumkin va o'shanda VILOYAT zaxirasi
-     * ishlatiladi (`org-routing.service.ts`). Natija `null`
-     * bo'lsa, ilova avvalgidek yo'nalishdagi matnni ko'rsatadi.
-     */
-    const owner = await this.prisma.citizen.findUnique({
-      where: { id: citizenId },
-      select: { mahallaId: true },
-    });
-
-    const org = await this.orgRouting.resolve(owner?.mahallaId ?? null, category.id);
-
     // ⚠️ IMZOLANADI: murojaat yaratishda mijoz shu tokenni qaytaradi va
     // server undan AI taklifini TIKLAYDI — foizni mijoz o'zgartira
     // olmaydi (soxta dalil bo'lardi).
@@ -755,8 +705,7 @@ export class MobileService {
         confidence: suggestion.confidence,
         priority: suggestion.priority,
         slaHours: category.slaHours,
-        /** ⚠️ Qoida topilsa haqiqiy nom, topilmasa yo'nalishdagi matn. */
-        orgName: org?.name ?? category.orgName,
+        orgName: category.orgName,
         /**
          * ⚠️ FUQAROGA KO'RSATILADI, LEKIN MUDDATNI BELGILAMAYDI:
          * muddat yo'nalish SLA'si yoki MFY qoidasidan chiqadi.
@@ -939,18 +888,6 @@ export class MobileService {
      */
     const auto = await this.rules.fieldsFor(mahallaId, category.id, category.slaHours);
 
-    /**
-     * ── IJROCHI TASHKILOT ───────────────────────────────────
-     *
-     * ⚠️ MFY SIZ MUROJAATDA HAM QIDIRILADI — va bu `rules` dan
-     * FARQLI. Ijrochi xodim MFY bo'yicha topiladi va hududsiz
-     * murojaatni biriktirish uni BEGONA tuman xodimiga
-     * yuborardi; tashkilot esa tuman darajasida ishlaydi va
-     * viloyat bo'ylab ZAXIRA qoidasi aynan shu holat uchun bor
-     * (`org-routing.service.ts`).
-     */
-    const org = await this.orgRouting.resolve(mahallaId, category.id);
-
     const issue = await this.prisma.issue.create({
       data: {
         publicNo,
@@ -971,14 +908,6 @@ export class MobileService {
         isRepeatAppeal: Boolean(dto.isRepeatAppeal),
         occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : null,
         sourceMeta: sourceMeta as Prisma.InputJsonValue,
-        /**
-         * ⚠️ MUHRLANGAN NUSXA (`assigneeId`, `mahallaId` bilan
-         * ayni qoida): qoida keyin o'zgarsa, bu murojaatning
-         * tashkiloti O'ZGARMAYDI — aks holda "o'tgan oy qaysi
-         * tashkilot nechta murojaat olgan" hisoboti jimgina
-         * qayta yozilardi.
-         */
-        organizationId: org?.organizationId ?? null,
         dueAt: auto?.dueAt ?? new Date(Date.now() + category.slaHours * 60 * 60 * 1000),
         /**
          * ⚠️ MUDDAT QAYERDAN KELGANI YOZIB QO'YILADI. "Muddat
@@ -1016,22 +945,6 @@ export class MobileService {
       select: { id: true, publicNo: true, createdAt: true, dueAt: true },
     });
 
-    /**
-     * ── TASHKILOTGA XABARNOMA ───────────────────────────────
-     *
-     * ⚠️ KUTILMAYDI (`void`): Telegram so'rovi sekin bo'lishi
-     * mumkin va fuqaro "yuborildi" javobini xabar ketishini
-     * kutib turmasligi kerak — u ilovada «Yuborilmoqda…»
-     * holatida qotib qolardi.
-     *
-     * ⚠️ TAKRORIY VA SHUBHALI MUROJAATDA YUBORILMAYDI — qoida
-     * `IssuesService.notifyOrganization` da, BITTA joyda
-     * (uchala yaratish yo'li uchun). Shu yerda qayta
-     * tekshirilsa, ikki nusxa paydo bo'lardi va bittasi
-     * albatta eskirardi.
-     */
-    if (org) void this.issues.notifyOrganization(issue.id);
-
     // ⚠️ YUBORILGANI UCHUN BALL (`points.ts` yagona manba).
     await this.prisma.citizen
       .update({
@@ -1046,14 +959,7 @@ export class MobileService {
       createdAt: issue.createdAt,
       dueAt: issue.dueAt,
       categoryName: category.name,
-      /**
-       * ⚠️ QOIDA TOPILGAN BO'LSA TASHKILOTNING HAQIQIY NOMI,
-       * topilmasa yo'nalishdagi MATN (`IssueCategory.orgName` —
-       * zaxira). Ikkisi aralashtirilmaydi: biri fuqaroga
-       * ko'rinadigan matn, ikkinchisi murojaat BORADIGAN manzil
-       * (schema'dagi izoh).
-       */
-      orgName: org?.name ?? category.orgName,
+      orgName: category.orgName,
       slaHours: category.slaHours,
       address: dto.address?.trim() || null,
     };

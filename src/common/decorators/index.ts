@@ -59,24 +59,6 @@ export const CITIZEN_ONLY_KEY = "citizenOnly";
  */
 export const CitizenOnly = () => SetMetadata(CITIZEN_ONLY_KEY, true);
 
-export const PASSWORD_CHANGE_KEY = "allowPendingPassword";
-
-/**
- * TAYYOR PAROL ALMASHTIRILMAGAN BO'LSA HAM ISHLAYDIGAN ENDPOINT.
- *
- * ⚠️ TO'SIQ SERVERDA, PANELDA EMAS. Faqat panel ekranida to'sib
- * qo'yilsa, nazorat KO'RINISH bo'lib qolardi: tayyor parol bilan
- * to'g'ridan-to'g'ri API ga so'rov yuborish mumkin edi va parollar
- * ro'yxati tarqalgan holatda u aynan shu yo'ldan ishlatilardi.
- *
- * ⚠️ MARSHRUT NOMI BO'YICHA TEKSHIRILMAYDI, METADATA BO'YICHA:
- * `request.url` bilan solishtirish `/api` prefiksi, versiya yoki
- * query qo'shilganda jimgina ishlamay qo'yardi — va o'shanda
- * foydalanuvchi parolni almashtira olmay, tizimga butunlay kira
- * olmasdi.
- */
-export const AllowPendingPassword = () => SetMetadata(PASSWORD_CHANGE_KEY, true);
-
 /** So'rov egasi — `JwtAuthGuard` joylashtiradi. */
 export interface RequestUser {
   id: string;
@@ -85,22 +67,6 @@ export interface RequestUser {
   scopeKind: ScopeKind;
   districtId: string | null;
   permissions: string[];
-  /**
-   * TASHKILOT — `scopeKind === "org"` bo'lganda to'ladi.
-   *
-   * ⚠️ `ScopeContext` GA SHU YERDAN O'TADI (`toScope` — yagona
-   * manba): maydon faqat bir joyda e'lon qilinsa, qamrov
-   * funksiyalari undan foydalanolmasdi.
-   */
-  organizationId: string | null;
-  /** Panel sarlavhasida ko'rsatiladi — tashkilot xodimi uchun. */
-  organizationName: string | null;
-  /**
-   * ⚠️ TAYYOR PAROL HALI ALMASHTIRILMAGAN. Panel bu bayroq bilan
-   * boshqa hamma sahifani YOPADI: tashkilotga qog'ozda berilgan
-   * parol almashtirilmasa, u tizimda abadiy qolardi.
-   */
-  mustChangePassword: boolean;
 }
 
 /**

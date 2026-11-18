@@ -34,7 +34,6 @@ import {
   CreateIssueDto,
   ListAssignmentRulesQuery,
   ListIssuesQuery,
-  MarkOrgDoneDto,
   ResolveIssueDto,
   SaveAssignmentRuleDto,
 } from "./dto/issues.dto";
@@ -132,28 +131,6 @@ export class IssuesController {
   @RequirePermissions("issues.resolve")
   reopen(@Param("id") id: string, @CurrentUser() user: RequestUser) {
     return this.issues.reopen(id, toScope(user));
-  }
-
-  /**
-   * TASHKILOT "BAJARDIM" DEB BELGILAYDI.
-   *
-   * ⚠️ RUXSAT `issues.view`, `issues.resolve` EMAS: bu amal
-   * murojaatni YOPMAYDI va fuqaroga hech narsa yubormaydi
-   * (`issues.service.ts#markOrgDone`). `issues.resolve` talab
-   * qilinsa, tashkilot hisobiga rasmiy javob yozish huquqi ham
-   * birga berilib ketardi.
-   *
-   * ⚠️ QAMROV BARIBIR TEKSHIRILADI (`loadForWrite`): begona
-   * tashkilotning murojaatiga tega olmaydi.
-   */
-  @Patch(":id/org-done")
-  @RequirePermissions("issues.view")
-  markOrgDone(
-    @Param("id") id: string,
-    @Body() dto: MarkOrgDoneDto,
-    @CurrentUser() user: RequestUser,
-  ) {
-    return this.issues.markOrgDone(id, dto.done ?? true, toScope(user));
   }
 
   @Post(":id/comments")
