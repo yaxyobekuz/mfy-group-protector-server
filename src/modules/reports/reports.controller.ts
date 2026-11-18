@@ -119,6 +119,30 @@ export class ReportsController {
     return this.coverage.coverage(toScope(user));
   }
 
+  /**
+   * MFY KESIMI — "QAYSI BIRI ULANDI, QAYSI BIRI YO'Q".
+   *
+   * ⚠️ `coverage` GA QO'SHILMAYDI, ALOHIDA SO'ROV: viloyatda yuzlab
+   * MFY bor va ularni yig'ma jadval bilan birga yuborish sahifaning
+   * BIRINCHI ochilishini sekinlashtirardi — holbuki xodim ro'yxatni
+   * faqat kerak bo'lganda, bitta tumanni ochib ko'radi.
+   *
+   * ⚠️ LEKIN HAR TUMAN UCHUN ALOHIDA EMAS, BITTA SO'ROVDA HAMMASI
+   * (`territory` sahifasidagi ayni qoida): 14 tuman ochilganda 14
+   * so'rov ketardi va ularning har biri ayni og'ir hisobni qayta
+   * bajarardi.
+   *
+   * ⚠️ RUXSAT — `reports.view`, `groups.view` EMAS: bu yerda MFY
+   * nomlari va chat SARLAVHALARI bor, lekin havola ham, `chatId` ham
+   * yo'q — ya'ni reyestr ishi emas, qamrovning o'sha hisoboti
+   * (`export/unassigned-groups` dan farqi aynan shunda).
+   */
+  @Get("coverage/mahallas")
+  @RequirePermissions("reports.view")
+  coverageMahallas(@CurrentUser() user: RequestUser) {
+    return this.coverage.mahallaCoverage(toScope(user));
+  }
+
   @Get("recurring")
   @RequirePermissions("reports.view")
   recurring(@CurrentUser() user: RequestUser, @Query() query: ReportQuery) {
