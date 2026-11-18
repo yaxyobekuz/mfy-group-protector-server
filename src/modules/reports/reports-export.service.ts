@@ -46,6 +46,26 @@ import type { ReportQuery } from "./dto/reports.dto";
 /** Qiymat yo'q — `0` EMAS, chiziqcha. */
 const DASH = "—";
 
+/**
+ * QALQON HOLATI — MFY KESIMIDAGI YORLIQLAR.
+ *
+ * ⚠️ `null` ("qalqon tegishli emas") CHIZIQCHA BO'LIB QOLADI:
+ * kanalda ham, bot umuman yo'q MFY da ham o'chiriladigan begona
+ * xabar yo'q (`common/chat-type.ts`). "Ishlamayapti" deb yozilsa,
+ * xodim TUZATIB BO'LMAYDIGAN vazifa olardi va haqiqiy nosozlik
+ * o'sha qatorlar orasida ko'rinmay ketardi.
+ *
+ * ⚠️ MATN PANELDAGI YORLIQLAR BILAN AYNI MA'NODA: fayl va ekran
+ * bir xil holatni boshqacha atasa, xodim ularni ikki boshqa narsa
+ * deb o'qirdi.
+ */
+const COVERAGE_GUARD: Record<string, string> = {
+  ok: "Ishlaydi",
+  "not-admin": "Admin emas",
+  "no-delete": "O'chirish huquqi yo'q",
+  none: DASH,
+};
+
 export interface ExportResult {
   filename: string;
   /** Tayyor XLSX — HTTP javobi bo'lib ketadi. */
@@ -320,7 +340,10 @@ export class ReportsExportService {
    * bilish uchun bugungi holat kerak.
    */
   private async coverage(scope: ScopeContext): Promise<ExportResult> {
-    const data = await this.coverageService.coverage(scope);
+    const [data, byMahalla] = await Promise.all([
+      this.coverageService.coverage(scope),
+      this.coverageService.mahallaCoverage(scope),
+    ]);
 
     const rows: unknown[][] = data.districts.map((row) => [
       row.districtName,
@@ -358,21 +381,70 @@ export class ReportsExportService {
       data.totals.coverageRate ?? DASH,
     ]);
 
-    return this.sheet(
-      "qamrov",
-      "Qamrov",
-      [
-        "Tuman",
-        "MFY jami",
-        "Bot bor",
-        "Bot yo'q",
-        "Faqat kanal",
-        "Admin emas",
-        "O'chirish huquqi yo'q",
-        "Qamrov (%)",
-      ],
-      rows,
-    );
+    /**
+     * HAR TUMAN — ALOHIDA VARAQ.
+     *
+     * ⚠️ "NECHTASI" VA "QAYSI BIRI" — IKKI BOSHQA SAVOL: birinchi
+     * varaq rahbariyat uchun ("qaysi tumanga odam yuborish kerak"),
+     * qolganlari esa ISHLASH uchun — xodim o'z tumanining varag'ini
+     * ochib, bot kirmagan mahallalar RO'YXATINI oladi va raisga
+     * qo'ng'iroq qiladi. Yakka jadvalda bu son bo'lib qolardi va
+     * nomlar hech qayerda ko'rinmasdi.
+     *
+     * ⚠️ BIR FAYLDA, IKKITA EMAS: alohida yuklab olinsa, rahbariyat
+     * ikki faylni yonma-yon ochib, qaysi qator qaysi varaqqa
+     * tegishliligini o'zi izlab o'tirardi.
+     *
+     * ⚠️ MFY SI YO'Q TUMANGA VARAQ YASALMAYDI: bo'sh varaq faylni
+     * shishirardi va uni ochgan odam "ma'lumot yo'qolibdi" deb
+     * o'ylardi. Tuman birinchi varaqda "MFY jami — 0" bo'lib
+     * baribir ko'rinadi.
+     */
+    const sheets = [
+      {
+        name: "Tumanlar",
+        headers: [
+          "Tuman",
+          "MFY jami",
+          "Bot bor",
+          "Bot yo'q",
+          "Faqat kanal",
+          "Admin emas",
+          "O'chirish huquqi yo'q",
+          "Qamrov (%)",
+        ],
+        rows,
+      },
+      ...byMahalla
+        .filter((district) => district.rows.length > 0)
+        .map((district) => ({
+          name: district.districtName,
+          headers: ["MFY", "Holat", "Chatlar", "Qalqon"],
+          rows: district.rows.map((row) => [
+            row.mahallaName,
+            /**
+             * ⚠️ SO'Z BILAN, `ha`/`yo'q` BILAN EMAS: fayl rasmiy
+             * hujjatga ko'chiriladi va "ulangan"/"ulanmagan" o'sha
+             * yerda o'qiladigan matn bo'lib qoladi.
+             */
+            row.connected ? "Ulangan" : "Ulanmagan",
+            /**
+             * ⚠️ CHAT NOMLARI "ULANMAGAN" QATORDA HAM TURADI: o'sha
+             * yerda ular ENG kerakli — guruh reyestrda bor, lekin
+             * bot undan chiqarib yuborilgan degan holatni faqat shu
+             * ustun ko'rsatadi (chora ham boshqa: guruh ochish emas,
+             * botni qaytarish).
+             */
+            row.chats.join(", ") || DASH,
+            COVERAGE_GUARD[row.guard ?? "none"],
+          ]),
+        })),
+    ];
+
+    return {
+      filename: `hisobot-qamrov-${this.stamp()}.xlsx`,
+      file: buildXlsx(sheets),
+    };
   }
 
   /**

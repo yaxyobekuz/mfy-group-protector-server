@@ -130,6 +130,47 @@ export interface CoverageRow {
   coverageRate: number | null;
 }
 
+/**
+ * MFY DARAJASIDAGI QATOR — "QAYSI BIRI ULANDI".
+ *
+ * ⚠️ TUMAN KESIMI "NECHTASI" GA JAVOB BERADI, BU "QAYSI BIRI" GA:
+ * "Baliqchi tumani — 42 MFY dan 30 tasi qoplangan" degan qator
+ * ma'muriyatga ISHLASH uchun yetmaydi, chunki qolgan 12 tasining
+ * NOMI yo'q. Xodim raisga qo'ng'iroq qilishi kerak bo'lgan mahalla
+ * aynan o'sha ro'yxatda.
+ *
+ * ⚠️ PANELDA KO'RSATILMAYDI, FAQAT FAYLDA: viloyatda yuzlab MFY
+ * bor va ularni ekranga chiqarish qamrov sahifasini uzun ro'yxatga
+ * aylantirardi — sahifaning ishi esa "qaysi tumanga odam yuborish
+ * kerak" degan savolga javob berish.
+ */
+export interface MahallaCoverageRow {
+  districtId: string;
+  districtName: string;
+  mahallaName: string;
+
+  /** Bot kamida bitta chatda ichkarida. */
+  connected: boolean;
+
+  /**
+   * MFY GA BIRIKTIRILGAN CHATLAR NOMI.
+   *
+   * ⚠️ RO'YXAT KERAK, SON EMAS: xodim "bot yo'q" degan qatorni
+   * ko'rganda birinchi savoli — "guruh umuman bormi yoki bot
+   * chiqarib yuborilganmi". Nom ko'rinsa, javob o'sha yerda.
+   */
+  chats: string[];
+
+  /**
+   * QALQON HOLATI — faqat guruhga tegishli.
+   *
+   * ⚠️ KANAL UCHUN `null`: u yerda o'chiriladigan begona xabar
+   * yo'q (fayl boshidagi doktrina) va "admin emas" yorlig'i
+   * TUZATIB BO'LMAYDIGAN ogohlantirish bo'lardi.
+   */
+  guard: "ok" | "not-admin" | "no-delete" | null;
+}
+
 export interface CoverageReport {
   districts: CoverageRow[];
   /**
@@ -157,14 +198,21 @@ export class ReportsCoverageService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * TUMAN KESIMIDAGI QAMROV.
+   * XOM HOLAT — HAR MFY UCHUN "BOT QAYERDA".
    *
    * ⚠️ UCHTA SO'ROV, HAR MFY UCHUN BITTA EMAS: viloyatda yuzlab MFY
    * bor va har biri uchun guruhlarini so'rash sahifani ochilmaydigan
    * qilardi. Guruhlar BITTA so'rovda olinadi va MFY lar bo'yicha
    * XOTIRADA guruhlanadi.
+   *
+   * ⚠️ TUMAN KESIMI VA MFY KESIMI SHU YERDAN CHIQADI: ikkisi ayni
+   * savolga ("bot ichidami") ayni qoidalar bilan javob beradi —
+   * `PRESENT_STATUSES`, "eng yaxshi holat olinadi", kanalning
+   * qalqon ustunlaridan chiqarilishi. Nusxa yozilsa, fayldagi son
+   * bilan ekrandagi son bir kuni AJRALIB ketardi va qaysi biri
+   * to'g'riligini hech kim ayta olmasdi.
    */
-  async coverage(scope: ScopeContext): Promise<CoverageReport> {
+  private async collect(scope: ScopeContext) {
     /**
      * ⚠️ QAMROV TEKSHIRUVI: tuman xodimi butun viloyat qamrovini
      * ko'rmasligi kerak — u faqat o'z tumani uchun javobgar va
@@ -192,7 +240,11 @@ export class ReportsCoverageService {
        */
       this.prisma.mahalla.findMany({
         where: { isArchived: false },
-        select: { id: true, districtId: true },
+        orderBy: { name: "asc" },
+        // ⚠️ `name` MFY KESIMI UCHUN: tuman jadvalida u ishlatilmaydi,
+        // lekin IKKI alohida so'rov yozilsa, biri arxiv shartini
+        // yo'qotib, ikki hisobot boshqa son ko'rsatardi.
+        select: { id: true, districtId: true, name: true },
       }),
       /**
        * ⚠️ FAQAT MFY GA BIRIKTIRILGANLARI: biriktirilmagan guruh
@@ -202,6 +254,7 @@ export class ReportsCoverageService {
        */
       this.prisma.telegramGroup.findMany({
         where: { mahallaId: { not: null } },
+        orderBy: { title: "asc" },
         select: {
           mahallaId: true,
           status: true,
@@ -209,6 +262,9 @@ export class ReportsCoverageService {
           // tegishli (fayl boshidagi doktrina).
           type: true,
           canDeleteMessages: true,
+          // ⚠️ `title` MFY KESIMI UCHUN — "bot yo'q" qatorida
+          // guruh umuman bor-yo'qligini ko'rsatadi.
+          title: true,
         },
       }),
       this.prisma.telegramGroup.count({
@@ -228,6 +284,8 @@ export class ReportsCoverageService {
         present: boolean;
         admin: boolean;
         canDelete: boolean;
+        /** MFY ga biriktirilgan chatlar nomi — MFY kesimi uchun. */
+        chats: string[];
         /**
          * ⚠️ MFY DA QALQON TEGISHLI BO'LGAN CHAT BORMI (ya'ni
          * kanal emas, guruh). Yo'q bo'lsa, `notAdmin` va
@@ -270,8 +328,25 @@ export class ReportsCoverageService {
           (current?.canDelete ?? false) ||
           (guardable && admin && group.canDeleteMessages),
         guardable: (current?.guardable ?? false) || guardable,
+        /**
+         * ⚠️ CHIQARIB YUBORILGAN CHAT HAM RO'YXATDA QOLADI: "bot
+         * yo'q" qatorini ko'rgan xodimning birinchi savoli — "guruh
+         * umuman bormi yoki bot undan chiqarib tashlanganmi", va
+         * javob aynan shu ustunda ko'rinadi.
+         */
+        chats: [...(current?.chats ?? []), group.title],
       });
     }
+
+    return { districts, mahallas, byMahalla, unassignedGroups };
+  }
+
+  /**
+   * TUMAN KESIMIDAGI QAMROV.
+   */
+  async coverage(scope: ScopeContext): Promise<CoverageReport> {
+    const { districts, mahallas, byMahalla, unassignedGroups } =
+      await this.collect(scope);
 
     const rows: CoverageRow[] = districts.map((district) => {
       const own = mahallas.filter((mahalla) => mahalla.districtId === district.id);
@@ -361,6 +436,57 @@ export class ReportsCoverageService {
         : null;
 
     return { districts: rows, unassignedGroups, totals };
+  }
+
+  /**
+   * MFY KESIMI — "QAYSI BIRI ULANDI, QAYSI BIRI YO'Q".
+   *
+   * ⚠️ TUMAN BO'YICHA GURUHLANGAN HOLDA QAYTADI: eksport har tumanni
+   * ALOHIDA varaqqa chiqaradi. Yakka ro'yxat berilsa, eksport uni
+   * qaytadan guruhlashi kerak bo'lardi — ya'ni tartiblash qoidasi
+   * ikki joyda yotardi.
+   *
+   * ⚠️ MFY SI YO'Q TUMAN HAM QAYTADI (bo'sh ro'yxat bilan): uni shu
+   * yerda tashlab yuborish "tuman umuman yo'q" degan taassurot
+   * berardi. Varaq yasash-yasamaslik qarorini eksport qiladi.
+   */
+  async mahallaCoverage(
+    scope: ScopeContext,
+  ): Promise<{ districtName: string; rows: MahallaCoverageRow[] }[]> {
+    const { districts, mahallas, byMahalla } = await this.collect(scope);
+
+    return districts.map((district) => ({
+      districtName: district.name,
+      rows: mahallas
+        .filter((mahalla) => mahalla.districtId === district.id)
+        .map((mahalla) => {
+          const state = byMahalla.get(mahalla.id);
+          const connected = state?.present ?? false;
+
+          /**
+           * ⚠️ QALQON USTUNI FAQAT ULANGAN VA GURUHI BOR MFY UCHUN:
+           * kanalda ham, bot umuman yo'q MFY da ham u `null` bo'lib
+           * qoladi. "Admin emas" deb yozilsa, ikkisida ham TUZATIB
+           * BO'LMAYDIGAN vazifa paydo bo'lardi.
+           */
+          let guard: MahallaCoverageRow["guard"] = null;
+
+          if (connected && state?.guardable) {
+            if (!state.admin) guard = "not-admin";
+            else if (!state.canDelete) guard = "no-delete";
+            else guard = "ok";
+          }
+
+          return {
+            districtId: district.id,
+            districtName: district.name,
+            mahallaName: mahalla.name,
+            connected,
+            chats: state?.chats ?? [],
+            guard,
+          };
+        }),
+    }));
   }
 
   /**

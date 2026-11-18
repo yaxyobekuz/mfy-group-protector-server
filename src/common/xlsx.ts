@@ -21,8 +21,13 @@
  * ⚠️ `exceljs` — o'nlab megabayt bog'liqlik (`archiver`, `jszip`,
  * `unzipper`) va panelning boshqa HECH QAYERIDA ishlatilmaydi.
  * Bizga kerak bo'lgani esa uning imkoniyatlarining atigi bir
- * bo'lagi: BITTA varaq, formulasiz, rasmsiz, bitta sarlavha
- * qatori.
+ * bo'lagi: formulasiz, rasmsiz, bitta sarlavha qatorli varaq.
+ *
+ * ⚠️ KO'P VARAQ KEYIN QO'SHILDI va u ham paket talab qilmadi:
+ * `workbook.xml` ga yana bitta qator, ZIP ga yana bitta fayl.
+ * Sabab — qamrov hisoboti: "qaysi MFY ulangan" degan savol tuman
+ * kesimidagi jadvalga SIG'MAYDI (yuzlab qator) va alohida fayl
+ * qilinsa, rahbariyat ikki faylni yonma-yon ochib solishtirardi.
  *
  * ⚠️ XLSX — ICHIDA XML BO'LGAN ZIP, ya'ni Node'ning O'Z `zlib` i
  * bilan yasaladi. Shuning uchun bu fayl bog'liqliksiz turadi va
@@ -228,7 +233,7 @@ const widths = (sheet: XlsxSheet): number[] =>
     return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, longest + 4));
   });
 
-const worksheet = (sheet: XlsxSheet): string => {
+const worksheet = (sheet: XlsxSheet, first: boolean): string => {
   const cols = widths(sheet)
     .map(
       (width, index) =>
@@ -261,12 +266,17 @@ const worksheet = (sheet: XlsxSheet): string => {
    *
    * ⚠️ `autoFilter` — saralash va filtr tugmalari: rahbariyat
    * faylni ochib "eng ko'p murojaatli tumanni" o'zi topadi.
+   *
+   * ⚠️ `tabSelected` FAQAT BIRINCHI VARAQDA: hammasida qoldirilsa,
+   * Excel kitobni HAMMA varag'i belgilangan holatda ochadi va o'sha
+   * paytda yozilgan har qiymat BARCHA varaqqa tushadi — fayl ochgan
+   * odam buni sezmaydi.
    */
   return `${DECL}
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <dimension ref="A1:${lastColumn}${lastRow}"/>
 <sheetViews>
-<sheetView workbookViewId="0" tabSelected="1">
+<sheetView workbookViewId="0"${first ? ' tabSelected="1"' : ""}>
 <pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>
 </sheetView>
 </sheetViews>
@@ -287,6 +297,37 @@ const worksheet = (sheet: XlsxSheet): string => {
 const sheetName = (name: string): string => {
   const safe = name.replace(/[:\\/?*[\]]/g, " ").trim();
   return safe.slice(0, 31).trim() || "Hisobot";
+};
+
+/**
+ * VARAQ NOMLARI — TAKRORLANMASLIGI SHART.
+ *
+ * ⚠️ EXCEL BIR XIL NOMLI IKKI VARAQNI QABUL QILMAYDI va faylni
+ * umuman ochmaydi ("tiklab bo'lmaydigan xato" deydi, sababini
+ * aytmaydi). Tuman nomlari o'zi takrorlanmaydi, lekin ular 31
+ * belgida KESILADI — ya'ni uzun nomli ikki tuman kesilgandan keyin
+ * bir xil bo'lib qolishi mumkin.
+ *
+ * ⚠️ RAQAM OXIRIGA QO'SHILADI, NOM ESA QAYTA KESILADI: aks holda
+ * "...tumani 2" 33 belgi bo'lib, ayni xatoni qaytarardi.
+ */
+const uniqueNames = (sheets: XlsxSheet[]): string[] => {
+  const used = new Set<string>();
+
+  return sheets.map((sheet) => {
+    const base = sheetName(sheet.name);
+    let name = base;
+    let suffix = 2;
+
+    while (used.has(name.toLowerCase())) {
+      const tail = ` ${suffix}`;
+      name = `${base.slice(0, 31 - tail.length).trim()}${tail}`;
+      suffix += 1;
+    }
+
+    used.add(name.toLowerCase());
+    return name;
+  });
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -401,15 +442,57 @@ const zip = (entries: ZipEntry[]): Buffer => {
 // ════════════════════════════════════════════════════════════════
 
 /**
- * BITTA VARAQLI XLSX YASAYDI.
+ * XLSX YASAYDI — BITTA VARAQ YOKI BIR NECHTASI.
  *
  * ⚠️ XOTIRADA YIG'ILADI, diskka yozilmaydi: hisobot HTTP javobi
  * bo'lib ketadi va vaqtinchalik fayl qoldirish faqat tozalash
  * muammosini qo'shardi (eksport chegarasi — 5000 qator, ya'ni
  * hajm bashorat qilinadigan).
+ *
+ * ⚠️ BITTA VARAQ HAM AYNI YO'LDAN O'TADI (massivga o'raladi):
+ * "bitta" va "ko'p" uchun ikki tana yozilsa, uslub yoki ustun
+ * kengligi bir joyda o'zgarib, ikkinchisi eskirardi — eksport esa
+ * olti kesimda chaqiriladi.
+ *
+ * ⚠️ VARAQ TARTIBI SAQLANADI: Excel ularni aynan shu ketma-ketlikda
+ * ko'rsatadi va qamrov hisobotida BIRINCHISI — umumiy jadval.
+ * Tuman varaqlari undan keyin turadi, ya'ni faylni ochgan odam avval
+ * yig'ma sonni ko'radi.
  */
-export const buildXlsx = (sheet: XlsxSheet): Buffer => {
-  const name = sheetName(sheet.name);
+export const buildXlsx = (input: XlsxSheet | XlsxSheet[]): Buffer => {
+  const sheets = Array.isArray(input) ? input : [input];
+  if (sheets.length === 0) throw new Error("XLSX: varaq berilmadi");
+
+  const names = uniqueNames(sheets);
+
+  /**
+   * ⚠️ USLUB OXIRGI `rId` NI OLADI: avval u `rId2` edi, chunki
+   * varaq bitta bo'lgan. Varaqlar soni o'zgaruvchi bo'lgach, qotib
+   * qolgan `rId2` ikkinchi varaqniki bilan TO'QNASHARDI — va Excel
+   * bunday faylni ochishdan bosh tortadi.
+   */
+  const stylesId = `rId${sheets.length + 1}`;
+
+  const overrides = sheets
+    .map(
+      (_, index) =>
+        `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+    )
+    .join("\n");
+
+  const list = names
+    .map(
+      (name, index) =>
+        `<sheet name="${xml(name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`,
+    )
+    .join("");
+
+  const links = sheets
+    .map(
+      (_, index) =>
+        `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`,
+    )
+    .join("\n");
 
   return zip([
     {
@@ -420,7 +503,7 @@ export const buildXlsx = (sheet: XlsxSheet): Buffer => {
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
 <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+${overrides}
 <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 </Types>`,
         "utf8",
@@ -441,7 +524,7 @@ export const buildXlsx = (sheet: XlsxSheet): Buffer => {
       data: Buffer.from(
         `${DECL}
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-<sheets><sheet name="${xml(name)}" sheetId="1" r:id="rId1"/></sheets>
+<sheets>${list}</sheets>
 </workbook>`,
         "utf8",
       ),
@@ -451,14 +534,17 @@ export const buildXlsx = (sheet: XlsxSheet): Buffer => {
       data: Buffer.from(
         `${DECL}
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+${links}
+<Relationship Id="${stylesId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`,
         "utf8",
       ),
     },
     { path: "xl/styles.xml", data: Buffer.from(STYLES, "utf8") },
-    { path: "xl/worksheets/sheet1.xml", data: Buffer.from(worksheet(sheet), "utf8") },
+    ...sheets.map((sheet, index) => ({
+      path: `xl/worksheets/sheet${index + 1}.xml`,
+      data: Buffer.from(worksheet(sheet, index === 0), "utf8"),
+    })),
   ]);
 };
 
