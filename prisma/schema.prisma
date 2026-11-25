@@ -513,7 +513,21 @@ enum SignalKind {
   complaint
   /// Taklif, yaxshilash istagi.
   suggestion
-  /// Javobsiz qolgan savol.
+  /// ⚠️ ISHLAB CHIQARILMAYDI — 2026-11-25 dan AI bu toifani
+  /// QAYTARMAYDI (`signal-ai.constants.ts#PRODUCIBLE_KINDS`).
+  ///
+  /// SABAB: oddiy ma'lumot so'rash ("MFY qachon ishlaydi?") navbatni
+  /// to'ldirib, haqiqiy shikoyatni ko'mib tashlardi. Savol ortida
+  /// MUAMMO bo'lsa ("suv qachon keladi?" = suv yo'q), u `complaint`
+  /// bo'lib tushadi — ya'ni toifa olib tashlandi, MAZMUN emas.
+  ///
+  /// ⚠️ ENUM QIYMATI O'CHIRILMAYDI, GARCHI YOZUVLARI O'CHIRILGAN
+  /// BO'LSA HAM. Postgres'da enum qiymatini olib tashlash butun
+  /// turni qayta yaratishni talab qiladi (`ALTER TYPE ... RENAME` +
+  /// yangi tur + ustunlarni ko'chirish) — bu `group_signals` ni
+  /// bloklaydi va `Settings`/filtrlar bilan birga buzilish xavfi
+  /// bor. Foydasi esa YO'Q: ishlab chiqarish tomoni ikki joyda
+  /// (prompt sxemasi va `normalizeSignal`) to'silgan.
   question
 }
 
@@ -560,6 +574,31 @@ model GroupSignal {
   /// Xabarning O'Z matni (kesilgan bo'lishi mumkin).
   summary  String
 
+  /// ── AI TAXMIN QILGAN YO'NALISH ──────────────────────────────────
+  ///
+  /// ⚠️ `issue_categories` GA ISHORA QILADI, alohida ro'yxat EMAS.
+  /// "Yo'nalishlar ilovaga alohida ochilmaydi" doktrinasi signalga
+  /// ham tegishli: bot ham, ilova ham, AI ham AYNI jadvalni o'qiydi.
+  /// Signal uchun alohida enum ochilsa, "qaysi yo'nalishda muammo
+  /// ko'p" degan savolga IKKITA, bir-biriga to'g'ri kelmaydigan
+  /// javob chiqardi.
+  ///
+  /// ⚠️ `String?` — TAXMIN, FAKT EMAS. Model ro'yxatda yo'q id
+  /// qaytarsa yoki yo'nalishlar umuman sozlanmagan bo'lsa, signal
+  /// BARIBIR yoziladi (`signal-ai.service.ts#normalizeSignal`):
+  /// shikoyatni yo'nalish taxmini uchun yo'qotish eng yomon natija.
+  ///
+  /// ⚠️ MUAMMOGA O'TGANDA QAYTA SO'RALADI: `Issue.categoryId` ni
+  /// ODAM tasdiqlaydi (`attach`), bu ustun esa TAKLIF sifatida
+  /// oynada oldindan tanlangan holda ko'rsatiladi. Avtomatik
+  /// ko'chirilsa, AI xatosi rasmiy navbatga jimgina o'tib ketardi
+  /// ("signal — muammo emas" doktrinasi).
+  ///
+  /// ⚠️ `onDelete: SetNull`, `Restrict` EMAS (`Issue` dan farqli):
+  /// taxminni yo'qotish arzon, lekin u yo'nalishni o'chirishni
+  /// to'sib turmasligi kerak. `Issue` da teskari — u rasmiy fakt.
+  categoryId String? @map("category_id")
+
   /// ── MANBA (muhrlangan) ──────────────────────────────────────────
   senderTgId String?   @map("sender_tg_id")
   senderName String?   @map("sender_name")
@@ -594,14 +633,20 @@ model GroupSignal {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  group         TelegramGroup @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
-  issue         Issue?        @relation(fields: [issueId], references: [id], onDelete: SetNull)
-  attachedUser  User?         @relation("SignalAttachedBy", fields: [attachedBy], references: [id], onDelete: SetNull)
-  dismissedUser User?         @relation("SignalDismissedBy", fields: [dismissedBy], references: [id], onDelete: SetNull)
+  group         TelegramGroup  @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+  issue         Issue?         @relation(fields: [issueId], references: [id], onDelete: SetNull)
+  category      IssueCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  attachedUser  User?          @relation("SignalAttachedBy", fields: [attachedBy], references: [id], onDelete: SetNull)
+  dismissedUser User?          @relation("SignalDismissedBy", fields: [dismissedBy], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt(sort: Desc)])
   @@index([chatId, status])
   @@index([severity, status])
+  /// ⚠️ HISOBOT KESIMI UCHUN: "qaysi yo'nalishda signal ko'p" degan
+  /// savol `groupBy(categoryId)` ga aylanadi va u butun jadvalni
+  /// o'qiydi. `status` bilan BIRGA — hisobotda ikkisi deyarli har
+  /// doim birga keladi ("ko'rilmagan signallar qaysi yo'nalishda").
+  @@index([categoryId, status])
   @@map("group_signals")
 }
 
@@ -712,6 +757,12 @@ model IssueCategory {
   children  IssueCategory[]   @relation("CategoryTree")
   issues    Issue[]
   assignees MahallaAssignee[]
+
+  /// ⚠️ AI TAXMINLARI — `issues` BILAN BIR XIL EMAS. Bu yo'nalishga
+  /// TEGISHLI deb TAXMIN qilingan signallar; ularning bir qismi
+  /// "muammo emas" deb yopiladi. Hisobotda ikkisi ALOHIDA ko'rsatiladi
+  /// ("signal — muammo emas" doktrinasi).
+  signals GroupSignal[]
 
   @@index([isActive, sortOrder])
   @@index([parentId, sortOrder])

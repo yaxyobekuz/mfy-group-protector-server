@@ -13,11 +13,17 @@
 /**
  * Tasnif modeli — `signal-ai` bilan AYNI model.
  *
- * ⚠️ TANLOV YO'Q: shlyuzda bitta model bor (`AI-SERVER-CHEATSHEET.md`
- * → `GET /models` bitta yozuv qaytaradi). Ikkisi "tasodifan bir xil"
- * emas, shunday BO'LISHI SHART edi ham: ikki joyda boshqa model
- * ishlatilsa, bir xil matn guruh oqimida va mobil oqimda boshqa-boshqa
- * toifaga tushardi.
+ * ⚠️ AYNI BO'LISHI SHART — VA ENDI BU O'ZIDAN KELIB CHIQMAYDI.
+ * Avval izohda "shlyuzda bitta model bor, tanlov yo'q" deyilgan edi;
+ * 2026-11-18 dan `GET /models` IKKI yozuv qaytaradi
+ * (`qwen3.5:122b`, `foundation-sec:8b`), ya'ni ikkisi endi
+ * ADASHISHI MUMKIN. Agar bu yerda boshqa model qo'yilsa, bir xil
+ * matn guruh oqimida va mobil oqimda boshqa-boshqa toifaga
+ * tushardi — fuqaro ko'rgan taklif shtab ko'rgan signalga mos
+ * kelmasdi. Birini o'zgartirgan odam IKKINCHISINI ham
+ * o'zgartirishi shart (`signal-ai.constants.ts`) — va UCHINCHISINI
+ * ham (`reports/reports-ai.service.ts`).
+ * Batafsil: `AI-SERVER-CHEATSHEET.md`, §2.
  */
 export const MODEL = "qwen3.5:122b";
 

@@ -34,7 +34,13 @@ import type { ScopeContext } from "../../common/scope.util";
 import { ReportsService } from "./reports.service";
 import type { ReportQuery } from "./dto/reports.dto";
 
-/** ⚠️ `signal-ai` va `mobile-ai` BILAN AYNI MODEL — shlyuzda bitta model bor. */
+/**
+ * ⚠️ `signal-ai` va `mobile-ai` BILAN AYNI MODEL — bu UCHALASIDA
+ * QO'LDA saqlanadi. Avval "shlyuzda bitta model bor" deb yozilgan
+ * edi, lekin 2026-11-18 dan `GET /models` ikki yozuv qaytaradi
+ * (`qwen3.5:122b`, `foundation-sec:8b`): endi birini almashtirib,
+ * qolganini esdan chiqarish MUMKIN. Uchtasi birga o'zgaradi.
+ */
 const MODEL = "qwen3.5:122b";
 
 const AI_TIMEOUT_MS = 60_000;

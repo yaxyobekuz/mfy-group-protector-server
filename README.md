@@ -65,11 +65,39 @@ tumanidagi guruhdan chiqqan signalni biriktira oladi.
 
 ### 5. AI matn yozmaydi
 
-Model faqat **tanlaydi** (bu gap signalga arziydimi) va **toifalaydi**
-(shikoyat / taklif / savol). Panelda ko'rinadigan matn — **xabarning
+Model faqat **tanlaydi** (bu gap signalga arziydimi), **toifalaydi**
+(shikoyat / taklif) va **yo'nalishni taxmin qiladi**
+(`issue_categories` dan). Panelda ko'rinadigan matn — **xabarning
 o'zi**. Avval model qisqa sarlavha yozardi va u har safar "...haqida
 shikoyat bor" degan o'ramga aylanib, odamning o'z gapini
 uzoqlashtirardi.
+
+### 5a. Signal — MUAMMO, savol emas (2026-11-25)
+
+Avval doktrina "**shubhada — signal**" edi: ortiqcha signalni odam bir
+bosishda yopadi, deb hisoblangan. Amalda teskari bo'ldi — navbat
+salomlashuv va oddiy savol bilan to'lib ketdi (1046 ta `question`
+signal), ko'rilganlarining esa faqat **8%** i haqiqiy muammoga
+aylangan. To'lib ketgan ro'yxatda operator hammasini ko'rishni
+to'xtatadi, ya'ni ortiqcha signal haqiqiy shikoyatni **ko'mib
+tashlaydi**.
+
+Endi doktrina — "**shubhada — qaytarma**", lekin umumiy
+ehtiyotkorlik emas, **`MUAMMO TESTI`**
+(`signal-ai.constants.ts#SYSTEM_PROMPT`): aniq narsa bormi, hali hal
+qilinmaganmi, MFY chora ko'ra oladimi. Uchtasidan biri yo'q bo'lsa —
+signal emas.
+
+`SignalKind.question` **ishlab chiqarilmaydi**
+(`PRODUCIBLE_KINDS`). Savol ortida muammo bo'lsa ("suv qachon
+keladi?" = suv yo'q), u `complaint` bo'lib tushadi — toifa olib
+tashlandi, **mazmun emas**.
+
+⚠️ O'LCHOV — `attachRate` (`reports.service.ts`): u tushib ketsa test
+juda qattiq, 100% ga yopishsa juda yumshoq. Yo'nalish kesimi esa
+"qaysi yo'nalishda muammo ko'p" degan savolga javob beradi — va past
+`attachRate` o'sha yerda "AI shu yo'nalishda yanglishayapti" degani,
+"muammo ko'p" emas.
 
 ### 6. Guruh xabarlari — navbat, arxiv emas
 
@@ -79,20 +107,40 @@ kerakli hamma narsa (matn, muallif, vaqt) ko'chirib olingan.
 
 ### 7. Model nomi kodda, shlyuz manzili `.env` da
 
-`signals/ai/signal-ai.constants.ts`. Model almashtirish — kod
-o'zgarishi: u xulosaning sifatiga va javob shakliga ta'sir qiladi.
+Model almashtirish — kod o'zgarishi: u xulosaning sifatiga va javob
+shakliga ta'sir qiladi.
+
+⚠️ **Model nomi UCHTA faylda, qo'lda ushlab turiladi** — birini
+o'zgartirgan odam qolganini ham o'zgartirishi shart, aks holda bir xil
+matn guruh oqimida va mobil oqimda **boshqa-boshqa toifaga** tushadi:
+
+- `signals/ai/signal-ai.constants.ts`
+- `mobile/ai/mobile-ai.constants.ts`
+- `reports/reports-ai.service.ts`
 
 Manzil esa `.env` dan (`AI_BASE_URL`): u **infratuzilma** — domen
 ko'chishi mumkin, model esa sifat masalasi va review'dan o'tishi kerak.
 
 ### 8. AI — o'zimizning shlyuz
 
-Model `api.vircity.uz` da ishlaydi, chaqiruv **bepul**
-(`AI-SERVER-CHEATSHEET.md`). API OpenAI bilan **mos**, shuning uchun
-`openai` paketi qoladi va faqat `baseURL` qo'shiladi.
+Model `api.vircity.uz` da ishlaydi, chaqiruv **bepul**. API OpenAI bilan
+**mos**, shuning uchun `openai` paketi qoladi va faqat `baseURL`
+qo'shiladi.
+
+📄 **Shlyuz haqida hamma tekshirilgan fakt — `AI-SERVER-CHEATSHEET.md`**
+(modellar, parametrlar, JSON rejimlari, o'lchangan tezlik va
+tekshirilMAGANlar ro'yxati). Kod unga `§N` bilan havola qiladi.
+
+⚠️ **Shlyuzda ikki model bor** (`qwen3.5:122b`, `foundation-sec:8b`) —
+biz birinchisini ishlatamiz; ikkinchisi kiberxavfsizlik uchun qurilgan
+va bu ish uchun yaroqsiz (cheat sheet, §2).
 
 ⚠️ **Embedding yo'q** (`/embeddings` → 404): semantik qidiruv va RAG
-bu shlyuz ustida qurilmaydi.
+bu shlyuz ustida qurilmaydi (§9).
+
+⚠️ **Shlyuz vaqti-vaqti bilan uzilib turadi** — so'rovni ~21 soniyada
+o'zi uzadi (bizning timeout 60s). Bunda navbat **yo'qolmaydi**: xabarlar
+tahlilsiz qoladi va keyingi aylanishda qayta ko'riladi (§7).
 
 ---
 

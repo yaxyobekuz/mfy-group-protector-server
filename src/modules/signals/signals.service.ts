@@ -33,10 +33,16 @@ import {
   type ScopeContext,
 } from "../../common/scope.util";
 import { paginate, type Paginated } from "../../common/dto/pagination.dto";
-import { IssueSource, SignalStatus } from "@prisma/client";
+import { IssueSource, SignalSeverity, SignalStatus } from "@prisma/client";
 import { IssuesService } from "../issues/issues.service";
 import { SettingsService } from "../settings/settings.service";
 import { SignalAiService } from "./ai/signal-ai.service";
+import {
+  DUPLICATE_WINDOW_HOURS,
+  MAX_RECENT_IN_PROMPT,
+  MAX_RECENT_SUMMARY,
+} from "./ai/signal-ai.constants";
+import { detectNoise, fingerprint, topicKey } from "./ai/signal-noise.filter";
 import type { AttachSignalDto, DismissSignalDto, ListSignalsQuery } from "./dto/signals.dto";
 
 const MS_PER_HOUR = 3_600_000;
@@ -52,6 +58,22 @@ export interface AnalysisSummary {
   failedGroups: number;
   /** Navbatda qolgan xabarlar. */
   pending: number;
+  /**
+   * SHOVQIN FILTRI TO'SGAN SIGNALLAR (`signal-noise.filter.ts`).
+   *
+   * ⚠️ PANELDA KO'RSATILADI va bu ATAYLAB: filtr jim ishlasa, u juda
+   * qattiq bo'lib ketganini HECH KIM sezmasdi. Raqam o'sib ketsa —
+   * ro'yxatni ko'rib, filtrni yumshatish kerak degan belgi.
+   */
+  filtered: number;
+  /**
+   * TAKROR DEB AVVALGI SIGNALGA QO'SHILGANLAR.
+   *
+   * ⚠️ "YO'QOTILDI" DEGANI EMAS: o'sha signalning `messageCount`
+   * qamrovi oshadi, ya'ni shtab bitta masalani necha kishi
+   * yozganini ko'radi.
+   */
+  merged: number;
   /** AI o'chirilgan yoki kalit yo'q. */
   skipped: boolean;
 }
@@ -83,7 +105,16 @@ export class SignalsService {
     const config = await this.settings.get();
 
     if (!config.aiEnabled || !this.ai.isEnabled()) {
-      return { analyzed: 0, signals: 0, groups: 0, failedGroups: 0, pending: 0, skipped: true };
+      return {
+        analyzed: 0,
+        signals: 0,
+        groups: 0,
+        failedGroups: 0,
+        pending: 0,
+        filtered: 0,
+        merged: 0,
+        skipped: true,
+      };
     }
 
     const pending = await this.prisma.groupMessage.findMany({
@@ -93,14 +124,136 @@ export class SignalsService {
     });
 
     if (pending.length === 0) {
-      return { analyzed: 0, signals: 0, groups: 0, failedGroups: 0, pending: 0, skipped: false };
+      return {
+        analyzed: 0,
+        signals: 0,
+        groups: 0,
+        failedGroups: 0,
+        pending: 0,
+        filtered: 0,
+        merged: 0,
+        skipped: false,
+      };
     }
+
+    /**
+     * YO'NALISHLAR — AI SHULARDAN BIRINI TANLAYDI.
+     *
+     * ⚠️ BIR MARTA, AYLANISH BOSHIDA o'qiladi — har guruh uchun
+     * emas. Ro'yxat bitta aylanish ichida o'zgarmaydi va 24 guruh
+     * uchun 24 marta so'rash bekor ish bo'lardi.
+     *
+     * ⚠️ FAQAT FAOLLARI: o'chirilgan yo'nalish botda ham
+     * ko'rsatilmaydi va unga yangi signal bog'lash "o'chirilgan
+     * yo'nalishda 12 signal" degan ma'nosiz kesim berardi.
+     *
+     * ⚠️ BO'SH BO'LSA TAHLIL TO'XTAMAYDI: signallar yo'nalishsiz
+     * yoziladi (`signal-ai.service.ts#AnalyzedSignal.categoryId`).
+     * Yo'nalish sozlanmagani — AI'ni o'chirish uchun sabab emas.
+     */
+    const categories = await this.prisma.issueCategory.findMany({
+      where: { isActive: true },
+      orderBy: { sortOrder: "asc" },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        // ⚠️ OTA NOMI HAM: yakka "Ichimlik suvi" kontekstsiz qoladi
+        // (mobil AI dagi ayni sabab).
+        parent: { select: { name: true } },
+      },
+    });
+
+    const analyzableCategories = categories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      description: category.description,
+      parentName: category.parent?.name ?? null,
+    }));
 
     const byChat = new Map<string, typeof pending>();
     for (const message of pending) {
       const bucket = byChat.get(message.chatId);
       if (bucket) bucket.push(message);
       else byChat.set(message.chatId, [message]);
+    }
+
+    /**
+     * OYNA ICHIDAGI OCHIQ SIGNALLAR — TAKRORNI TO'SISH UCHUN.
+     *
+     * ⚠️ IKKI ISHNI BAJARADI va shuning uchun BIR MARTA o'qiladi:
+     *   1) modelga "ALLAQACHON QAYD ETILGAN" ro'yxati bo'lib boradi;
+     *   2) kodda barmoq izi va mavzu bo'yicha to'siq quriladi.
+     *
+     * ⚠️ FAQAT `new`: e'tiborsiz qoldirilgan (`dismissed`) signal
+     * "bu masala ko'rilgan" degani EMAS — operator uni XATO deb
+     * yopgan bo'lishi mumkin va o'sha masala qayta yozilishi KERAK.
+     * Biriktirilgani (`attached`) esa allaqachon muammoga aylangan,
+     * ya'ni rasmiy navbatda — uni signal sifatida takrorlash bekor.
+     * Hozircha `new` yetarli: aynan u to'lib ketyapti.
+     *
+     * ⚠️ BITTA SO'ROV, HAR GURUH UCHUN ALOHIDA EMAS: 726 guruh bor
+     * va har biriga so'rov yuborish aylanishni sekinlashtirardi
+     * (yo'nalishlar bilan ayni mulohaza).
+     */
+    const since = new Date(Date.now() - DUPLICATE_WINDOW_HOURS * MS_PER_HOUR);
+
+    const recentSignals = await this.prisma.groupSignal.findMany({
+      where: {
+        chatId: { in: [...byChat.keys()] },
+        status: SignalStatus.new,
+        createdAt: { gte: since },
+      },
+      select: { id: true, chatId: true, summary: true, severity: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    /**
+     * GURUH → TO'SIQ HOLATI.
+     *
+     * ⚠️ HOLAT AYLANISH ICHIDA O'SIB BORADI: shu aylanishda yozilgan
+     * signal ham keyingilari uchun to'siq bo'ladi. Aks holda bitta
+     * javobdagi "svet o'chdi" va "svetta nima gaplar" ikkisi ham
+     * yozilardi.
+     */
+    const guards = new Map<
+      string,
+      { prints: Map<string, string>; topics: Map<string, string>; recent: string[] }
+    >();
+
+    for (const chatId of byChat.keys()) {
+      guards.set(chatId, { prints: new Map(), topics: new Map(), recent: [] });
+    }
+
+    for (const signal of recentSignals) {
+      const guard = guards.get(signal.chatId);
+      if (!guard) continue;
+
+      guard.prints.set(fingerprint(signal.summary), signal.id);
+
+      /**
+       * ⚠️ `high` MAVZU TO'SIG'IGA QO'SHILMAYDI. Xavfsizlik yoki
+       * sog'liq masalasi "ayni mavzu" deb yopilsa, bolalar
+       * maydonchasi haqidagi ikkinchi shikoyat jimgina yo'qolardi.
+       * Barmoq izi to'sig'i esa unga HAM tegishli — u faqat AYNAN
+       * bir xil matnni tutadi.
+       */
+      if (signal.severity === SignalSeverity.high) continue;
+
+      const topic = topicKey(signal.summary);
+      if (topic && !guard.topics.has(topic)) guard.topics.set(topic, signal.id);
+    }
+
+    // Modelga beriladigan ro'yxat — eng yangi `MAX_RECENT_IN_PROMPT` ta.
+    for (const signal of recentSignals) {
+      const guard = guards.get(signal.chatId);
+      if (!guard || guard.recent.length >= MAX_RECENT_IN_PROMPT) continue;
+
+      guard.recent.push(
+        signal.summary.length > MAX_RECENT_SUMMARY
+          ? `${signal.summary.slice(0, MAX_RECENT_SUMMARY)}…`
+          : signal.summary,
+      );
     }
 
     let created = 0;
@@ -110,9 +263,21 @@ export class SignalsService {
     // xabarga aylanardi: aslida hech narsa ko'rilmagan edi.
     let analyzed = 0;
     let failedGroups = 0;
+    let filtered = 0;
+    let merged = 0;
 
     for (const [chatId, messages] of byChat) {
-      const result = await this.ai.analyze(messages);
+      const guard = guards.get(chatId) ?? {
+        prints: new Map<string, string>(),
+        topics: new Map<string, string>(),
+        recent: [],
+      };
+
+      const result = await this.ai.analyze(
+        messages,
+        analyzableCategories,
+        guard.recent,
+      );
 
       // ⚠️ NOSOZLIKDA `analyzedAt` QO'YILMAYDI: qo'yilsa xabarlar
       // tahlilsiz qolib, keyingi aylanishda ham olinmasdi — ya'ni
@@ -123,26 +288,106 @@ export class SignalsService {
         continue;
       }
 
-      analyzed += messages.length;
+      analyzed += result.consumed.length;
 
       for (const signal of result.signals) {
+        /**
+         * ── 1. SHOVQIN FILTRI ────────────────────────────────────
+         *
+         * ⚠️ MODEL JAVOBIDAN KEYIN, LEKIN BAZADAN OLDIN. Nega
+         * umuman kerak — `signal-noise.filter.ts` izohiga qara:
+         * promptdagi taqiqlar bir kun sinalib, ishlamagani
+         * O'LCHANGAN.
+         *
+         * ⚠️ TO'SILGANI LOGGA CHIQADI, `debug` darajasida: kuniga
+         * yuzlab yozuv bo'ladi va `log` ga chiqarilsa jurnalni
+         * ko'mib tashlardi. Lekin UMUMAN yozmaslik ham xato —
+         * filtr nimani qirqayotganini tekshirib bo'lmasdi.
+         */
+        const noise = detectNoise(signal.summary);
+        if (noise) {
+          filtered += 1;
+          this.logger.debug(
+            `shovqin [${noise}] ${chatId}#${signal.messageId}: ${signal.summary.slice(0, 60)}`,
+          );
+          continue;
+        }
+
+        /**
+         * ── 2. AYNI MATN TAKRORI ─────────────────────────────────
+         *
+         * ⚠️ JIDDIYLIKDAN QAT'I NAZAR: aynan bir xil matn — bu
+         * uzatilgan yoki qayta yuborilgan xabar, yangi xabar emas.
+         */
+        const print = fingerprint(signal.summary);
+        const printOwner = guard.prints.get(print);
+
+        /**
+         * ── 3. AYNI MAVZU ────────────────────────────────────────
+         *
+         * ⚠️ `high` OZOD — `guards` qurilishidagi ayni sabab:
+         * xavfsizlik masalasini "takror" deb yopib bo'lmaydi.
+         */
+        const topic = topicKey(signal.summary);
+        const topicOwner =
+          signal.severity === SignalSeverity.high || !topic
+            ? undefined
+            : guard.topics.get(topic);
+
+        const owner = printOwner ?? topicOwner;
+
+        if (owner) {
+          /**
+           * ⚠️ TASHLANMAYDI, AVVALGISIGA QO'SHILADI. `messageCount`
+           * — "AI nechta xabarni ko'rib shu xulosaga kelgan" degan
+           * QAMROV ustuni va takror aynan shunga qo'shiladi: shtab
+           * bitta masalani NECHA KISHI yozganini ko'radi. Ya'ni
+           * raqam "ko'rilgan xabar" emas, "masalaning og'irligi"
+           * bo'lib ishlaydi.
+           *
+           * ⚠️ XATO YUTILADI: signal o'chirilgan bo'lishi mumkin
+           * (operator shu orada yopdi). Qamrov yangilanmasligi —
+           * tahlilni to'xtatish uchun sabab emas.
+           */
+          merged += 1;
+          await this.prisma.groupSignal
+            .update({
+              where: { id: owner },
+              data: { messageCount: { increment: 1 } },
+            })
+            .catch(() => undefined);
+          continue;
+        }
+
         try {
-          await this.prisma.groupSignal.create({
+          const row = await this.prisma.groupSignal.create({
             data: {
               chatId: signal.chatId,
               messageId: signal.messageId,
               kind: signal.kind,
               severity: signal.severity,
               summary: signal.summary,
+              // ⚠️ TAXMIN, FAKT EMAS: `null` bo'lishi mumkin va bu
+              // signalni yozishga to'sqinlik qilmaydi (izoh
+              // `signal-ai.service.ts#normalizeSignal` da).
+              categoryId: signal.categoryId,
               senderTgId: signal.senderTgId,
               senderName: signal.senderName,
               sentAt: signal.sentAt,
               // Qamrov: AI nechta xabarni ko'rib shu xulosaga kelgan.
-              messageCount: messages.length,
+              messageCount: result.consumed.length,
               model: result.model,
             },
+            select: { id: true },
           });
           created += 1;
+
+          // ⚠️ YANGI SIGNAL O'ZI HAM TO'SIQQA AYLANADI — shu
+          // aylanishning qolgan qismi uchun (izoh `guards` da).
+          guard.prints.set(print, row.id);
+          if (topic && signal.severity !== SignalSeverity.high) {
+            if (!guard.topics.has(topic)) guard.topics.set(topic, row.id);
+          }
         } catch (error) {
           // ⚠️ BITTA SIGNAL YOZILMASA QOLGANLARI YOZILADI: aks holda
           // bitta yaroqsiz yozuv butun guruhning tahlilini
@@ -151,16 +396,32 @@ export class SignalsService {
         }
       }
 
-      // Shu guruhning xabarlari ko'rib chiqildi.
+      /**
+       * MODELGA BERILGAN xabarlar ko'rib chiqildi.
+       *
+       * ⚠️ `result.consumed`, `messages` EMAS — VA BU NOSOZLIK
+       * TUZATISHI. `analyze()` so'rovni yengil saqlash uchun
+       * birinchi `MAX_MESSAGES_PER_CALL` tasini oladi, bu yer esa
+       * guruhning BARCHA navbatdagi xabarini "ko'rildi" deb
+       * belgilardi — ya'ni ortig'i modelga ko'rsatilmay, keyingi
+       * aylanishda ham olinmay, `sweep()` da o'chib ketardi.
+       * O'LCHANGAN: 821 xabar shunday yo'qolgan (izoh
+       * `signal-ai.service.ts#AnalysisResult.consumed` da).
+       */
       await this.prisma.groupMessage.updateMany({
-        where: { id: { in: messages.map((message) => message.id) } },
+        where: { id: { in: result.consumed.map((message) => message.id) } },
         data: { analyzedAt: new Date() },
       });
     }
 
     if (analyzed > 0) {
+      // ⚠️ TO'SILGANLAR HAM AYTILADI: "12 signal" bilan "12 signal,
+      // 40 shovqin to'sildi" — BOSHQA xabar. Ikkinchisi filtr
+      // ishlayotganini va qancha ishlayotganini ko'rsatadi; raqam
+      // g'ayritabiiy o'sib ketsa, filtrni ko'rib chiqish kerak.
       this.logger.log(
-        `${byChat.size} guruh, ${analyzed} xabar tahlil qilindi — ${created} signal`,
+        `${byChat.size} guruh, ${analyzed} xabar tahlil qilindi — ` +
+          `${created} signal (${filtered} shovqin to'sildi, ${merged} takror qo'shildi)`,
       );
     }
 
@@ -170,6 +431,8 @@ export class SignalsService {
       groups: byChat.size,
       failedGroups,
       pending: pending.length - analyzed,
+      filtered,
+      merged,
       skipped: false,
     };
   }
@@ -212,6 +475,13 @@ export class SignalsService {
       ...(query.kind ? { kind: query.kind } : {}),
       ...(query.severity ? { severity: query.severity } : {}),
       ...(query.chatId ? { chatId: query.chatId } : {}),
+      /**
+       * ⚠️ `categoryId` — AI TAXMINI bo'yicha filtr. Hisobotda
+       * "Kommunal bo'yicha 40 signal" ko'ringanda operator shu
+       * yerga o'tib, AYNAN o'sha 40 tasini ko'rishi kerak — aks
+       * holda hisobot "qiziqarli raqam", lekin ishga aylanmaydi.
+       */
+      ...(query.categoryId ? { categoryId: query.categoryId } : {}),
       /* ⚠️ `mahallaId` USTUN (issues bilan ayni mantiq). */
       ...(query.mahallaId
         ? { group: { mahallaId: query.mahallaId } }
@@ -244,6 +514,13 @@ export class SignalsService {
               },
             },
           },
+          // ⚠️ `color` VA `parent` HAM: panelda yo'nalish hamma
+          // joyda O'Z rangi bilan ko'rinadi, yakka "Ichimlik suvi"
+          // esa kontekstsiz qoladi (hisobot jadvali bilan ayni
+          // mantiq).
+          category: {
+            select: { id: true, name: true, color: true, parent: { select: { name: true } } },
+          },
           attachedUser: { select: { id: true, firstName: true, lastName: true } },
           dismissedUser: { select: { id: true, firstName: true, lastName: true } },
           issue: { select: { id: true, publicNo: true, status: true } },
@@ -258,6 +535,21 @@ export class SignalsService {
       severity: signal.severity,
       summary: signal.summary,
       status: signal.status,
+
+      /**
+       * ⚠️ AI TAXMINI — `null` BO'LISHI MUMKIN va panel buni
+       * AJRATIB ko'rsatadi ("yo'nalish aniqlanmadi"). Bo'sh joy
+       * qoldirilsa, operator "Boshqa" deb o'ylab, hisobotdagi
+       * raqamni noto'g'ri o'qiydi.
+       */
+      category: signal.category
+        ? {
+            id: signal.category.id,
+            name: signal.category.name,
+            parentName: signal.category.parent?.name ?? null,
+            color: signal.category.color,
+          }
+        : null,
 
       senderName: signal.senderName,
       sentAt: signal.sentAt,

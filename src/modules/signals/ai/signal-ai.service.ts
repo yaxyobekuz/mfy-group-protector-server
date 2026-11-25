@@ -28,12 +28,24 @@ import {
   MAX_SIGNALS,
   MAX_SUMMARY,
   MODEL,
+  PRODUCIBLE_KINDS,
   SIGNALS_SCHEMA,
   SYSTEM_PROMPT,
 } from "./signal-ai.constants";
 
 /** Tahlilga beriladigan xabar (navbatdan o'qilgan qator). */
 export interface AnalyzableMessage {
+  /**
+   * NAVBAT QATORINING ID'SI — `group_messages.id`.
+   *
+   * ⚠️ MODELGA BERILMAYDI (`buildUserText` da yo'q): u xabarni
+   * Telegram'dagi `messageId` orqali ko'rsatadi. Bu ustun esa
+   * CHAQIRUVCHIGA kerak — `AnalysisResult.consumed` dagi xabarlarni
+   * aynan shu id bo'yicha "ko'rildi" deb belgilaydi. Avval servis
+   * o'zining ro'yxatini belgilardi va modelga berilmagan xabarlar
+   * ham muhrlanib ketardi (izoh `consumed` da).
+   */
+  id: string;
   chatId: string;
   messageId: string;
   senderTgId: string | null;
@@ -43,6 +55,29 @@ export interface AnalyzableMessage {
   sentAt: Date;
 }
 
+/**
+ * MODELGA BERILADIGAN YO'NALISH — `issue_categories` dan.
+ *
+ * ⚠️ `mobile-ai.service.ts#AnalyzableCategory` BILAN AYNI SHAKL va
+ * bu ATAYLAB: ikkisi ham AYNI jadvaldan o'qiydi ("yo'nalishlar
+ * ilovaga alohida ochilmaydi" doktrinasi, `schema.prisma`). Umumiy
+ * tipga chiqarilmadi, chunki ikki modul bir-biriga bog'lanib
+ * qolardi — shakl bir xil bo'lsa ham MAQSAD boshqa: biri fuqaroga
+ * taklif qiladi, bu esa hisobot kesimini to'ldiradi.
+ */
+export interface AnalyzableCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  /**
+   * ⚠️ ASOSIY YO'NALISH NOMI — KICHIK YO'NALISH UCHUN. Yakka
+   * "Ichimlik suvi" degan yozuv kontekstsiz qoladi va model uni
+   * "Tozalik va ekologiya" bilan adashtirishi mumkin (mobil AI
+   * dagi ayni sabab).
+   */
+  parentName?: string | null;
+}
+
 /** Tahlil natijasidagi bitta signal — bazaga shu shaklda yoziladi. */
 export interface AnalyzedSignal {
   chatId: string;
@@ -50,6 +85,15 @@ export interface AnalyzedSignal {
   kind: SignalKind;
   severity: SignalSeverity;
   summary: string;
+  /**
+   * AI TAXMIN QILGAN YO'NALISH — `null` bo'lishi MUMKIN.
+   *
+   * ⚠️ `null` — NOSOZLIK EMAS: model ro'yxatda yo'q id qaytargan
+   * bo'lsa (yoki yo'nalishlar umuman sozlanmagan bo'lsa) signal
+   * BARIBIR yoziladi, faqat yo'nalishsiz. Shikoyatni yo'nalish
+   * taxmini uchun tashlab yuborish eng yomon natija bo'lardi.
+   */
+  categoryId: string | null;
   senderTgId: string | null;
   senderName: string | null;
   sentAt: Date;
@@ -58,6 +102,29 @@ export interface AnalyzedSignal {
 export interface AnalysisResult {
   signals: AnalyzedSignal[];
   model: string;
+  /**
+   * MODELGA HAQIQATAN BERILGAN xabarlar.
+   *
+   * ⚠️ BU MAYDON NOSOZLIKNI TUZATISH UCHUN QO'SHILDI. Avval
+   * `analyze()` ichida `messages.slice(0, MAX_MESSAGES_PER_CALL)`
+   * qilinardi, lekin `signals.service.ts` guruhning BARCHA navbatdagi
+   * xabarini `analyzedAt` bilan belgilardi — ya'ni 15 dan ortig'i
+   * modelga KO'RSATILMAY, lekin "ko'rildi" deb muhrlanardi va
+   * `sweep()` ularni o'chirib yuborardi.
+   *
+   * O'LCHANGAN (2026-11-25): 54 holatda 15 dan ortiq xabar
+   * belgilangan, JAMI 821 xabar modelga berilmasdan yo'qolgan (eng
+   * kattasi — 93 xabarlik guruh, 78 tasi ko'rilmagan). Bu
+   * `signal-ai.constants.ts#MAX_MESSAGES_PER_CALL` dagi "navbat
+   * yo'qolmaydi, faqat sekinlashadi" izohiga TO'G'RIDAN-TO'G'RI
+   * qarshi edi.
+   *
+   * ⚠️ CHEGARA SHU YERDA QOLADI (servisda emas): `MAX_MESSAGES_PER_CALL`
+   * — so'rovning og'irligi haqidagi qaror va u so'rovni YUBORADIGAN
+   * joyga tegishli. Servis esa nimani belgilashni SHU MAYDONDAN
+   * biladi — taxmin qilmaydi.
+   */
+  consumed: AnalyzableMessage[];
 }
 
 /** Modeldan kelgan xom yozuv. */
@@ -65,9 +132,17 @@ interface RawSignal {
   messageId?: unknown;
   kind?: unknown;
   severity?: unknown;
+  categoryId?: unknown;
 }
 
-const VALID_KINDS = new Set<string>(Object.values(SignalKind));
+/**
+ * ⚠️ `PRODUCIBLE_KINDS`, `Object.values(SignalKind)` EMAS. Model
+ * `question` qaytarsa u RAD ETILADI: toifa Prisma enum'ida hali
+ * bor, lekin AI uni ishlab chiqarmaydi (izoh — konstantalar
+ * faylida). Sxema ham shu ro'yxatni beradi, lekin sxema QIYMATNI
+ * majburlamaydi (cheat sheet, §6) — ishonchli tekshiruv SHU YERDA.
+ */
+const VALID_KINDS = new Set<string>(PRODUCIBLE_KINDS);
 const VALID_SEVERITIES = new Set<string>(Object.values(SignalSeverity));
 
 @Injectable()
@@ -99,14 +174,23 @@ export class SignalAiService {
    * aralashtirib yuborardi ("A mahallada suv yo'q" + "B mahallada
    * yo'l buzilgan" → bitta signal).
    *
+   * @param categories Panelda sozlangan FAOL yo'nalishlar. Bo'sh
+   *   bo'lsa tahlil TO'XTAMAYDI — signallar yo'nalishsiz yoziladi
+   *   (izoh `AnalyzedSignal.categoryId` da).
+   *
    * @returns Nosozlikda `null` — xabarlar navbatda QOLADI.
    */
-  async analyze(messages: AnalyzableMessage[]): Promise<AnalysisResult | null> {
+  async analyze(
+    messages: AnalyzableMessage[],
+    categories: AnalyzableCategory[] = [],
+    recentSummaries: string[] = [],
+  ): Promise<AnalysisResult | null> {
     const client = this.getClient();
     if (!client || messages.length === 0) return null;
 
     const batch = messages.slice(0, MAX_MESSAGES_PER_CALL);
     const byMessageId = new Map(batch.map((message) => [message.messageId, message]));
+    const validCategories = new Set(categories.map((category) => category.id));
 
     let completion: OpenAI.Chat.Completions.ChatCompletion;
     try {
@@ -115,7 +199,10 @@ export class SignalAiService {
           model: MODEL,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: this.buildUserText(batch) },
+            {
+              role: "user",
+              content: this.buildUserText(batch, categories, recentSummaries),
+            },
           ],
           // ⚠️ JSON SXEMASI, `json_object` EMAS. Shlyuzda
           // TEKSHIRILGANI — `json_schema` (cheat sheet, §6);
@@ -135,10 +222,14 @@ export class SignalAiService {
               schema: SIGNALS_SCHEMA,
             },
           },
-          // ⚠️ `max_tokens`, `max_completion_tokens` EMAS: shlyuzda
-          // TIRIK TEKSHIRILGAN (2026-11-07) — `max_tokens` qabul
-          // qilinadi. Yangi nom e'tiborsiz qoldirilsa, javob
-          // shlyuzning o'z standartida kesilardi.
+          // ⚠️ `max_tokens` — ISHLAYDI, lekin "yangi nomni shlyuz
+          // e'tiborsiz qoldiradi" degan avvalgi sabab ENDI TO'G'RI
+          // EMAS: 2026-11-18 da tekshirilganda `max_completion_tokens`
+          // ham HURMAT QILINDI (20 berilganda javob aynan 20 tokenda
+          // `finish_reason: "length"` bilan kesildi). Ya'ni ikkisi
+          // ham yaroqli; `max_tokens` shunchaki O'RNIDA QOLDIRILDI,
+          // chunki u tekshirilgan va almashtirish hech narsa
+          // bermaydi.
           //
           // ⚠️ `temperature` YUBORILMAYDI — izoh konstantalar
           // faylida.
@@ -174,12 +265,27 @@ export class SignalAiService {
 
     const raw = Array.isArray(parsed.signals) ? (parsed.signals as RawSignal[]) : [];
 
+    /**
+     * ⚠️ AYNI `messageId` IKKI MARTA KELSA — BITTASI OLINADI.
+     * Model bir javobda o'sha xabarni qayta-qayta ko'rsatishi mumkin
+     * va har biri ALOHIDA qator bo'lib yozilardi: bazada 5 holat
+     * topilgan (ayni `chat_id` + `message_id`, ayni soniyada ikki
+     * signal). `group_signals` da `@@unique([chatId, messageId])` yo'q
+     * va u ATAYLAB yo'q — bir xabar haqida HAR XIL mavzudagi ikki
+     * signal bo'lishi mumkin — shuning uchun to'siq shu yerda.
+     */
+    const seen = new Set<string>();
     const signals = raw
-      .map((item) => this.normalizeSignal(item, byMessageId))
+      .map((item) => this.normalizeSignal(item, byMessageId, validCategories))
       .filter((item): item is AnalyzedSignal => item !== null)
+      .filter((item) => {
+        if (seen.has(item.messageId)) return false;
+        seen.add(item.messageId);
+        return true;
+      })
       .slice(0, MAX_SIGNALS);
 
-    return { signals, model: MODEL };
+    return { signals, model: MODEL, consumed: batch };
   }
 
   // ───────────────────────────────────────────────────────────────
@@ -209,9 +315,23 @@ export class SignalAiService {
    *
    * Har qator `#<id> [vaqt] Ism: matn` — model `messageId` ni shundan
    * oladi va biz signalni HAQIQIY xabarga bog'lay olamiz.
+   *
+   * ⚠️ YO'NALISHLAR RO'YXATI SHU YERDA, PROMPTDA EMAS: u panelda
+   * o'zgaradigan JONLI ma'lumot (`issue_categories`). Promptga
+   * yozilsa, yangi yo'nalish qo'shilganda ikkisi jimgina ajralib
+   * ketardi — model esa endi yo'q bo'lgan id'ni qaytarib turardi.
+   *
+   * ⚠️ RO'YXAT XABARLARDAN KEYIN, OLDIN EMAS: uzun ro'yxat boshda
+   * turganda model asosiy ishni (xabarlarni o'qish) ro'yxatdan
+   * KEYIN ko'rardi. Oxirdagi ko'rsatma esa qaror payti yaqinroq
+   * turadi.
    */
-  private buildUserText(messages: AnalyzableMessage[]): string {
-    return messages
+  private buildUserText(
+    messages: AnalyzableMessage[],
+    categories: AnalyzableCategory[],
+    recentSummaries: string[] = [],
+  ): string {
+    const lines = messages
       .map((message) => {
         const who = message.senderName || "Noma'lum";
 
@@ -232,6 +352,65 @@ export class SignalAiService {
         return `#${message.messageId} [${time}] ${who}${reply}: ${message.text}`;
       })
       .join("\n");
+
+    /**
+     * ALLAQACHON QAYD ETILGAN — SHU GURUHNING OCHIQ SIGNALLARI.
+     *
+     * ⚠️ NIMA UCHUN MODELGA BERILADI: u bir aylanishda guruhdan
+     * faqat 15 xabar ko'radi va O'ZINING avvalgi xulosasini
+     * KO'RMAYDI. Shuning uchun bitta svet uzilishi ketma-ket
+     * to'plamlarda qayta-qayta signal bo'lardi — promptdagi "bitta
+     * signalga birlashtir" qoidasi faqat BITTA so'rov ichida
+     * ishlaydi.
+     *
+     * ⚠️ BU KODDAGI TO'SIQNING O'RNINI BOSMAYDI
+     * (`signals.service.ts` → `topicKey`), chunki model ro'yxatni
+     * e'tiborsiz qoldirishi mumkin. Lekin filtr FAQAT tanigan
+     * mavzularni birlashtiradi — ro'yxatga tushmagan takrorni
+     * (masalan "it talayapti") faqat MODEL tutib qoladi. Ikkisi bir
+     * joyni emas, BOSHQA-BOSHQA joyni yopadi.
+     *
+     * ⚠️ BO'SH BO'LSA BO'LIM QO'SHILMAYDI — yo'nalishlar bilan ayni
+     * sabab: bo'sh sarlavha modelni chalg'itadi.
+     */
+    const recent =
+      recentSummaries.length > 0
+        ? [
+            "",
+            "ALLAQACHON QAYD ETILGAN (bu masalalarni QAYTA signal qilma):",
+            ...recentSummaries.map((summary) => `- ${summary}`),
+          ]
+        : [];
+
+    // ⚠️ YO'NALISH YO'Q BO'LSA BO'LIM UMUMAN QO'SHILMAYDI: bo'sh
+    // "YO'NALISHLAR:" sarlavhasi modelni chalg'itib, o'zidan id
+    // o'ylab topishga undardi.
+    if (categories.length === 0) {
+      return recent.length > 0 ? [lines, ...recent].join("\n") : lines;
+    }
+
+    const list = categories
+      .map((category) => {
+        // ⚠️ "ASOSIY → Kichik" (mobil AI bilan ayni sabab): yakka
+        // "Ichimlik suvi" kontekstsiz qoladi.
+        const label = category.parentName
+          ? `${category.parentName} → ${category.name}`
+          : category.name;
+
+        return category.description
+          ? `- ${category.id} — ${label} (${category.description})`
+          : `- ${category.id} — ${label}`;
+      })
+      .join("\n");
+
+    return [
+      "XABARLAR:",
+      lines,
+      ...recent,
+      "",
+      "YO'NALISHLAR (categoryId faqat shu ro'yxatdan):",
+      list,
+    ].join("\n");
   }
 
   /**
@@ -251,9 +430,15 @@ export class SignalAiService {
   private normalizeSignal(
     raw: RawSignal,
     byMessageId: Map<string, AnalyzableMessage>,
+    validCategories: ReadonlySet<string>,
   ): AnalyzedSignal | null {
     if (!raw || typeof raw !== "object") return null;
 
+    // ⚠️ BU TEKSHIRUV ENDI `question` NI HAM TUTADI: `VALID_KINDS`
+    // `PRODUCIBLE_KINDS` dan yasalgan, ya'ni model eski toifani
+    // qaytarsa signal TASHLANADI. Prisma enum'ida `question` hali
+    // bor — demak bazaga yozilib ketishi MUMKIN edi va faqat shu
+    // qator buni to'sib turadi.
     const kind = String(raw.kind ?? "").trim();
     if (!VALID_KINDS.has(kind)) return null;
 
@@ -285,6 +470,25 @@ export class SignalAiService {
 
     const severity = String(raw.severity ?? "").trim();
 
+    /**
+     * ⚠️ BEGONA YO'NALISH SIGNALNI O'LDIRMAYDI, `null` ga tushadi.
+     * Bu `messageId` dan FARQLI muomala va farq ataylab:
+     *
+     *   messageId yo'q  → signalni TEKSHIRIB BO'LMAYDI (matn ham,
+     *                     havola ham, muallif ham o'sha xabardan) →
+     *                     tashlanadi;
+     *   categoryId yo'q → signal TO'LIQ, faqat hisobot kesimi
+     *                     to'lmaydi → saqlanadi.
+     *
+     * Ikkisini bir xil qattiq tekshirish model yo'nalishni chalkash
+     * tanlagani uchun HAQIQIY shikoyatni yo'qotardi.
+     *
+     * ⚠️ `mobile-ai` da bu teskari (`null` qaytaradi) — chunki u
+     * yerda taklifning O'ZI yuk, bu yerda esa signal.
+     */
+    const rawCategoryId = String(raw.categoryId ?? "").trim();
+    const categoryId = validCategories.has(rawCategoryId) ? rawCategoryId : null;
+
     return {
       chatId: source.chatId,
       messageId,
@@ -292,6 +496,7 @@ export class SignalAiService {
       severity: VALID_SEVERITIES.has(severity)
         ? (severity as SignalSeverity)
         : SignalSeverity.normal,
+      categoryId,
       // Xabarning o'zi. Juda uzun bo'lsa kesiladi — to'lig'i havolada.
       summary: text.length > MAX_SUMMARY ? `${text.slice(0, MAX_SUMMARY)}…` : text,
       senderTgId: source.senderTgId,

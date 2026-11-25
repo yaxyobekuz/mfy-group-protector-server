@@ -471,10 +471,32 @@ export class ReportsService {
         : {}),
     };
 
-    const [byStatus, byKind, bySeverity] = await Promise.all([
+    const [byStatus, byKind, bySeverity, byCategory] = await Promise.all([
       this.prisma.groupSignal.groupBy({ by: ["status"], where, _count: { _all: true } }),
       this.prisma.groupSignal.groupBy({ by: ["kind"], where, _count: { _all: true } }),
       this.prisma.groupSignal.groupBy({ by: ["severity"], where, _count: { _all: true } }),
+      /**
+       * YO'NALISH KESIMI — "qaysi yo'nalishda muammo ko'p".
+       *
+       * ⚠️ `status` VA `severity` HAM GURUHLANADI, faqat
+       * `categoryId` emas. Sabab: yalang'och "Kommunal — 40
+       * signal" degan son HECH NARSA aytmaydi, chunki ichida
+       * "muammo emas" deb yopilganlari ham bor. Kesim ma'noli
+       * bo'lishi uchun uchtasi BIRGA kerak:
+       *
+       *   jami 40 / 30 tasi muammoga aylandi  → haqiqiy muammo o'chog'i
+       *   jami 40 / 2 tasi muammoga aylandi   → AI shu yo'nalishda
+       *                                         yanglishayapti
+       *
+       * Ikkinchi holatda xulosa "Kommunalda muammo ko'p" EMAS,
+       * balki "promptni tuzatish kerak" bo'ladi — va bu farqni
+       * faqat `status` kesimi ko'rsatadi.
+       */
+      this.prisma.groupSignal.groupBy({
+        by: ["categoryId", "status", "severity"],
+        where,
+        _count: { _all: true },
+      }),
     ]);
 
     const status: Record<string, number> = { new: 0, attached: 0, dismissed: 0 };
@@ -493,9 +515,125 @@ export class ReportsService {
       status,
       kind,
       severity,
+      byCategory: await this.buildSignalCategoryRows(byCategory),
       attachRate:
         reviewed > 0 ? Math.round((status.attached! / reviewed) * 1000) / 10 : null,
     };
+  }
+
+  /**
+   * YO'NALISH KESIMINI ODAM O'QIYDIGAN QATORLARGA AYLANTIRADI.
+   *
+   * ⚠️ NOMLAR ALOHIDA SO'ROVDA olinadi, `include` bilan emas:
+   * `groupBy` relation'ni qo'shib bera olmaydi. Faqat KERAKLI
+   * id'lar so'raladi — butun jadval emas (`byCategory` dagi ayni
+   * mantiq).
+   *
+   * ⚠️ YO'NALISHSIZ SIGNALLAR YO'QOTILMAYDI, alohida qator bo'lib
+   * chiqadi (`categoryId: null`). Ularni jim tashlab yuborish
+   * "jami" ni ustunlar yig'indisidan KATTA qilib qo'yardi va
+   * hisobotga ishonchni buzardi. Bu qator o'zi ham xabar beradi:
+   * ko'p bo'lsa — AI yo'nalishni aniqlay olmayapti.
+   */
+  private async buildSignalCategoryRows(
+    rows: {
+      categoryId: string | null;
+      status: SignalStatus;
+      severity: SignalSeverity;
+      _count: { _all: number };
+    }[],
+  ) {
+    const ids = [
+      ...new Set(
+        rows
+          .map((row) => row.categoryId)
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+
+    const categories =
+      ids.length > 0
+        ? await this.prisma.issueCategory.findMany({
+            where: { id: { in: ids } },
+            select: {
+              id: true,
+              name: true,
+              color: true,
+              icon: true,
+              parent: { select: { name: true } },
+            },
+          })
+        : [];
+
+    const byId = new Map(categories.map((category) => [category.id, category]));
+
+    interface Bucket {
+      total: number;
+      newCount: number;
+      attached: number;
+      dismissed: number;
+      high: number;
+    }
+
+    const buckets = new Map<string, Bucket>();
+
+    for (const row of rows) {
+      // ⚠️ `null` KALITI BO'SH SATR BO'LIB saqlanadi: `Map` kaliti
+      // sifatida `null` ishlaydi, lekin keyin `byId.get(null)` ni
+      // tekshirish kerak bo'lardi. Bo'sh satr bu farqni bitta
+      // joyda ushlab turadi.
+      const key = row.categoryId ?? "";
+      const bucket =
+        buckets.get(key) ??
+        { total: 0, newCount: 0, attached: 0, dismissed: 0, high: 0 };
+
+      const count = row._count._all;
+      bucket.total += count;
+
+      if (row.status === SignalStatus.new) bucket.newCount += count;
+      if (row.status === SignalStatus.attached) bucket.attached += count;
+      if (row.status === SignalStatus.dismissed) bucket.dismissed += count;
+      if (row.severity === SignalSeverity.high) bucket.high += count;
+
+      buckets.set(key, bucket);
+    }
+
+    return [...buckets.entries()]
+      .map(([key, bucket]) => {
+        const category = key ? byId.get(key) : undefined;
+        const reviewed = bucket.attached + bucket.dismissed;
+
+        return {
+          categoryId: key || null,
+          // ⚠️ YO'NALISHSIZ QATOR ANIQ NOMLANADI: "—" qo'yilsa
+          // operator uni "nomi yo'q yo'nalish" deb o'qib, sozlamada
+          // izlab yurardi.
+          name: key ? (category?.name ?? "—") : "Yo'nalish aniqlanmagan",
+          parentName: category?.parent?.name ?? null,
+          color: category?.color ?? null,
+          icon: category?.icon ?? null,
+          total: bucket.total,
+          new: bucket.newCount,
+          attached: bucket.attached,
+          dismissed: bucket.dismissed,
+          high: bucket.high,
+          /**
+           * ⚠️ YO'NALISH KESIMIDAGI ANIQLIK — umumiy `attachRate`
+           * bilan AYNI maxraj (`new` hisobga olinmaydi): ko'rilmagan
+           * signal AI to'g'ri topganini BILDIRMAYDI.
+           *
+           * Bu ustun savolni ikkiga ajratadi: "bu yo'nalishda
+           * muammo ko'pmi" (→ `total`) yoki "AI shu yo'nalishda
+           * yanglishayaptimi" (→ past `attachRate`).
+           */
+          attachRate:
+            reviewed > 0
+              ? Math.round((bucket.attached / reviewed) * 1000) / 10
+              : null,
+        };
+      })
+      // ⚠️ JAMI BO'YICHA: savol "qaysi yo'nalishda signal KO'P".
+      .sort((a, b) => b.total - a.total);
   }
 
   /**

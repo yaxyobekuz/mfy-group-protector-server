@@ -26,6 +26,14 @@ export class ListSignalsQuery extends PaginationQuery {
   @IsOptional() @IsEnum(SignalKind) kind?: SignalKind;
   @IsOptional() @IsEnum(SignalSeverity) severity?: SignalSeverity;
   @IsOptional() @IsString() chatId?: string;
+  /**
+   * AI TAXMIN QILGAN YO'NALISH bo'yicha filtr.
+   *
+   * ⚠️ `Issue.categoryId` BILAN BIR XIL EMAS: bu AI taxmini, u esa
+   * odam tasdiqlagan fakt. Hisobotdagi "Kommunal — 40 signal"
+   * raqamidan shu filtrga o'tiladi.
+   */
+  @IsOptional() @IsString() categoryId?: string;
   /** ⚠️ Xaritadan o'tish uchun — tuman kesimi (MFY orqali). */
   @IsOptional() @IsString() districtId?: string;
   @IsOptional() @IsString() mahallaId?: string;

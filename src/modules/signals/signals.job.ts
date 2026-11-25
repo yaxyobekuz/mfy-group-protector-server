@@ -167,6 +167,8 @@ export class SignalsJob implements OnModuleInit {
         groups: 0,
         failedGroups: 0,
         pending: 0,
+        filtered: 0,
+        merged: 0,
         skipped: false,
       };
       this.lastResult = failed;
