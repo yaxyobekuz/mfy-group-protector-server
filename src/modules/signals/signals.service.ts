@@ -43,6 +43,7 @@ import {
   MAX_RECENT_SUMMARY,
 } from "./ai/signal-ai.constants";
 import { detectNoise, fingerprint, topicKey } from "./ai/signal-noise.filter";
+import { truncate } from "../../common/text.util";
 import type { AttachSignalDto, DismissSignalDto, ListSignalsQuery } from "./dto/signals.dto";
 
 const MS_PER_HOUR = 3_600_000;
@@ -249,11 +250,10 @@ export class SignalsService {
       const guard = guards.get(signal.chatId);
       if (!guard || guard.recent.length >= MAX_RECENT_IN_PROMPT) continue;
 
-      guard.recent.push(
-        signal.summary.length > MAX_RECENT_SUMMARY
-          ? `${signal.summary.slice(0, MAX_RECENT_SUMMARY)}…`
-          : signal.summary,
-      );
+      // ⚠️ `truncate` — emojini yarmidan kesmaslik uchun: buzuq
+      // satr promptga tushib, shlyuzni yiqitardi
+      // (`common/text.util.ts`).
+      guard.recent.push(truncate(signal.summary, MAX_RECENT_SUMMARY));
     }
 
     let created = 0;
@@ -456,11 +456,7 @@ export class SignalsService {
              * eng yangi signal eng muhimi (izoh
              * `MAX_RECENT_IN_PROMPT` da).
              */
-            guard.recent.unshift(
-              signal.summary.length > MAX_RECENT_SUMMARY
-                ? `${signal.summary.slice(0, MAX_RECENT_SUMMARY)}…`
-                : signal.summary,
-            );
+            guard.recent.unshift(truncate(signal.summary, MAX_RECENT_SUMMARY));
             if (guard.recent.length > MAX_RECENT_IN_PROMPT) guard.recent.pop();
           } catch (error) {
             // ⚠️ BITTA SIGNAL YOZILMASA QOLGANLARI YOZILADI: aks holda

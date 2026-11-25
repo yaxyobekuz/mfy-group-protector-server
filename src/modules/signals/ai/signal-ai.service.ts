@@ -19,6 +19,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import OpenAI from "openai";
 
 import { env } from "../../../config/env.config";
+import { stripLoneSurrogates, truncate } from "../../../common/text.util";
 import { SignalKind, SignalSeverity } from "@prisma/client";
 import {
   AI_MAX_RETRIES,
@@ -201,7 +202,17 @@ export class SignalAiService {
             { role: "system", content: SYSTEM_PROMPT },
             {
               role: "user",
-              content: this.buildUserText(batch, categories, recentSummaries),
+              /**
+               * ⚠️ OXIRGI HIMOYA: yolg'iz surrogat BIZNING
+               * kesishimizdan emas, MANBADAN ham kelishi mumkin
+               * (Telegram buzuq matn uzatsa). O'sha holatda butun
+               * guruh yana jimgina to'xtab qolardi — sabab esa
+               * "no low surrogate" degan xatodan topilmasdi.
+               * Izoh: `common/text.util.ts`.
+               */
+              content: stripLoneSurrogates(
+                this.buildUserText(batch, categories, recentSummaries),
+              ),
             },
           ],
           // ⚠️ JSON SXEMASI, `json_object` EMAS. Shlyuzda
@@ -345,8 +356,15 @@ export class SignalAiService {
 
         // Javob bo'lsa — nimaga javob ekani. "Ha, menda ham shunday"
         // degan xabar o'zicha ma'nosiz, javob bo'lgani bilan ma'noli.
+        //
+        // ⚠️ `truncate`, `slice` EMAS — VA BU TIRIK NOSOZLIK
+        // TUZATISHI. `slice(0, 120)` emojini surrogat juftligining
+        // o'rtasidan kesib, shlyuzga yaroqsiz JSON yuborardi
+        // ("no low surrogate"). Bitta guruh shu sababli
+        // 24-noyabrdan beri umuman tahlil qilinmagan. Batafsil:
+        // `common/text.util.ts`.
         const reply = message.replyToText
-          ? ` (javob: "${message.replyToText.slice(0, 120)}")`
+          ? ` (javob: "${truncate(message.replyToText, 120, "")}")`
           : "";
 
         return `#${message.messageId} [${time}] ${who}${reply}: ${message.text}`;
@@ -498,7 +516,10 @@ export class SignalAiService {
         : SignalSeverity.normal,
       categoryId,
       // Xabarning o'zi. Juda uzun bo'lsa kesiladi — to'lig'i havolada.
-      summary: text.length > MAX_SUMMARY ? `${text.slice(0, MAX_SUMMARY)}…` : text,
+      // ⚠️ `truncate` — bazaga YOLG'IZ SURROGAT yozilmasligi uchun.
+      // Buzuq `summary` keyin "allaqachon qayd etilgan" ro'yxatiga
+      // tushib, shlyuzni YANA yiqitardi (`common/text.util.ts`).
+      summary: truncate(text, MAX_SUMMARY),
       senderTgId: source.senderTgId,
       senderName: source.senderName,
       sentAt: source.sentAt,
