@@ -348,60 +348,41 @@ export class SignalsService {
           /**
            * ── 1. SHOVQIN FILTRI ────────────────────────────────────
            *
-           * ⚠️ MODEL JAVOBIDAN KEYIN, LEKIN PANELDAN OLDIN. Nega
+           * ⚠️ MODEL JAVOBIDAN KEYIN, LEKIN BAZADAN OLDIN. Nega
            * umuman kerak — `signal-noise.filter.ts` izohiga qara:
            * promptdagi taqiqlar bir kun sinalib, ishlamagani
            * O'LCHANGAN.
            *
-           * ⚠️ TASHLANMAYDI, `dismissed` BO'LIB YOZILADI — va bu
-           * loyihaning MAVJUD doktrinasi (`schema.prisma`,
-           * `dismissedBy` izohi): "e'tiborsiz qoldirilgan signal
-           * O'CHIRILMAYDI: AI nimani noto'g'ri topganini ko'rish
-           * kerak (prompt shunga qarab tuzatiladi)". Panel standart
-           * holda faqat `new` ni ko'rsatadi, ya'ni bu yozuvlar ishga
-           * XALAQIT BERMAYDI.
+           * ⚠️ TO'SILGAN SIGNAL BAZAGA YOZILMAYDI — SOZLAMA QARORI
+           * (2026-11-25). Qisqa vaqt `status: dismissed` bo'lib
+           * yozilgan edi (`schema.prisma` dagi "AI xatosini ko'rish
+           * kerak" doktrinasiga qarab), lekin bu kuniga ~1000
+           * yozuv bergan va saqlanishi KERAK EMAS deb hal qilindi.
            *
-           * ⚠️ AVVAL `logger.debug` BILAN YOZILGAN EDI VA U
-           * PRODUCTION'DA UMUMAN CHIQMAYDI (tekshirildi: jurnalda 0
-           * marta). Ya'ni filtr nimani qirqayotganini keyinchalik
-           * BILIB BO'LMASDI — holbuki chegarani yumshatish yoki
-           * qattiqlashtirish uchun aynan shu ro'yxat kerak.
-           * Sanoqchi (`filtered`) umumiy sonni beradi, lekin
-           * "NIMA qirqildi" degan savolga javob bermaydi.
+           * ⚠️ NIMA YO'QOTILGANI OCHIQ AYTILADI: "filtr aynan NIMANI
+           * qirqdi" degan savolga endi javob yo'q. Bu bo'sh gap
+           * emas — audit izi qo'shilgan kuni u filtrning 4 ta
+           * bo'shligini ko'rsatdi (telefon/javobsizlik shikoyatlari,
+           * "су", "совет", "очередь") va 41 ta noto'g'ri yopilgan
+           * signal topildi. Kelgusida chegarani sozlash kerak
+           * bo'lsa, filtrni VAQTINCHA yana yozishga o'tkazib,
+           * bir-ikki kunlik kesim olish to'g'ri yo'l bo'ladi.
            *
-           * ⚠️ TO'SIQQA QO'SHILMAYDI (`guard.prints` / `guard.topics`):
-           * shovqin yozuvi OCHIQ signal emas. Qo'shilsa, o'sha
-           * mavzudagi HAQIQIY shikoyat "takror" deb yopilardi.
+           * ⚠️ SANOQCHI O'RNIDA QOLADI: `filtered` aylanish logida
+           * va panelda ko'rinadi ("40 shovqin to'sildi"). Ya'ni
+           * filtr QANCHA qirqayotgani kuzatiladi, faqat NIMA
+           * qirqayotgani ko'rinmaydi. Sanoqchi ham olib tashlansa,
+           * filtr butunlay ko'rinmas bo'lib qolardi — va juda
+           * qattiq bo'lib ketganini hech kim sezmasdi.
+           *
+           * ⚠️ `logger.debug` ATAYLAB ISHLATILMAYDI: production
+           * log darajasida u UMUMAN chiqmaydi (tekshirilgan —
+           * jurnalda 0 marta), ya'ni "logga yozdim" degan yolg'on
+           * tasalli bo'lardi.
            */
           const noise = detectNoise(signal.summary);
           if (noise) {
             filtered += 1;
-            try {
-              await this.prisma.groupSignal.create({
-                data: {
-                  chatId: signal.chatId,
-                  messageId: signal.messageId,
-                  kind: signal.kind,
-                  severity: signal.severity,
-                  summary: signal.summary,
-                  categoryId: signal.categoryId,
-                  senderTgId: signal.senderTgId,
-                  senderName: signal.senderName,
-                  sentAt: signal.sentAt,
-                  messageCount: result.consumed.length,
-                  model: result.model,
-                  status: SignalStatus.dismissed,
-                  dismissedAt: new Date(),
-                  // ⚠️ `dismissedBy` — `null`: buni ODAM yopmagan.
-                  // Shu farq bo'yicha "AI nimani qirqdi" va
-                  // "operator nimani rad etdi" ajratiladi.
-                  dismissedReason: `avtomatik filtr: ${noise}`,
-                },
-              });
-            } catch (error) {
-              // Shovqin yozuvi yozilmasa tahlil to'xtamaydi.
-              this.logger.warn(`Shovqin yozilmadi: ${(error as Error).message}`);
-            }
             continue;
           }
 
