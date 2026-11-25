@@ -26,7 +26,6 @@ import {
 } from "@nestjs/common";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import {
   canTouchDistrict,
   isProvinceWide,
@@ -63,7 +62,6 @@ export class IssuesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
     private readonly notify: IssueNotifyService,
     private readonly rules: AssignmentRulesService,
   ) {}
@@ -191,14 +189,6 @@ export class IssuesService {
         sourceMeta: { channel: "panel" },
       },
       select: { id: true, publicNo: true },
-    });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: "issue.create",
-      entity: "Issue",
-      entityId: issue.id,
-      meta: { publicNo: issue.publicNo },
     });
 
     return issue;
@@ -469,14 +459,6 @@ export class IssuesService {
       select: { id: true, assigneeId: true, status: true, dueAt: true },
     });
 
-    await this.audit.record({
-      userId: scope.userId,
-      action: "issue.assign",
-      entity: "Issue",
-      entityId: id,
-      meta: { before: issue.assigneeId, after: dto.assigneeId ?? null },
-    });
-
     return updated;
   }
 
@@ -512,14 +494,6 @@ export class IssuesService {
         reviewedAt: new Date(),
       },
       select: { id: true, publicNo: true, status: true, title: true },
-    });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: dto.rejected ? "issue.reject" : "issue.resolve",
-      entity: "Issue",
-      entityId: id,
-      meta: { publicNo: updated.publicNo },
     });
 
     // ⚠️ XABAR YUBORISH ASOSIY AMALDAN KEYIN VA UNI TO'XTATMAYDI:
@@ -621,18 +595,6 @@ export class IssuesService {
         },
       });
 
-      await this.audit.record({
-        userId: scope.userId,
-        action: dto.rejected ? "issue.reject.bulk" : "issue.resolve.bulk",
-        entity: "Issue",
-        entityId: parentId,
-        meta: {
-          publicNo: parentPublicNo,
-          closed: duplicates.length,
-          reason: "takroriy murojaatlar",
-        },
-      });
-
       for (const duplicate of duplicates) {
         await this.notify.sendResolution({
           chatId: this.replyChatId(duplicate),
@@ -685,13 +647,6 @@ export class IssuesService {
         reviewedAt: null,
       },
       select: { id: true, status: true },
-    });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: "issue.reopen",
-      entity: "Issue",
-      entityId: id,
     });
 
     return updated;

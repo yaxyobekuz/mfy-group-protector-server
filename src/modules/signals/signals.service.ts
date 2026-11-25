@@ -25,7 +25,6 @@ import {
 } from "@nestjs/common";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import {
   canTouchDistrict,
   isProvinceWide,
@@ -85,7 +84,6 @@ export class SignalsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
     private readonly ai: SignalAiService,
     private readonly settings: SettingsService,
     private readonly issues: IssuesService,
@@ -788,14 +786,6 @@ export class SignalsService {
       return created;
     });
 
-    await this.audit.record({
-      userId: scope.userId,
-      action: "signal.attach",
-      entity: "GroupSignal",
-      entityId: id,
-      meta: { issueId: issue.id, publicNo: issue.publicNo },
-    });
-
     return { signalId: id, issueId: issue.id, publicNo: issue.publicNo };
   }
 
@@ -836,14 +826,6 @@ export class SignalsService {
         dismissedAt: new Date(),
         dismissedReason: dto.reason?.trim() || null,
       },
-    });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: "signal.dismiss",
-      entity: "GroupSignal",
-      entityId: id,
-      meta: { reason: dto.reason ?? null },
     });
 
     return { id, status: SignalStatus.dismissed };

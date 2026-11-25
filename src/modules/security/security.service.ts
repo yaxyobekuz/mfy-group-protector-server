@@ -52,7 +52,6 @@ import {
 } from "@nestjs/common";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import {
   CHANNEL_TYPE,
   guardApplies,
@@ -83,7 +82,6 @@ export class SecurityService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════
@@ -430,21 +428,6 @@ export class SecurityService {
       },
     });
 
-    await this.audit.record({
-      userId,
-      action: "security.false_positive",
-      entity: "SecurityEvent",
-      entityId: id,
-      meta: {
-        chatId: event.chatId,
-        kind: event.kind,
-        reason: event.reason,
-        url: event.url,
-        allowedHost,
-      },
-      ip,
-    });
-
     return {
       ok: true,
       isFalsePositive: updated.isFalsePositive,
@@ -657,15 +640,6 @@ export class SecurityService {
       select: { chatId: true, title: true, guardEnabled: true, guardAt: true },
     });
 
-    await this.audit.record({
-      userId: actorId,
-      action: dto.guardEnabled ? "group.guard_on" : "group.guard_off",
-      entity: "telegram_group",
-      entityId: chatId,
-      meta: { title: group.title },
-      ip,
-    });
-
     return updated;
   }
 
@@ -763,29 +737,6 @@ export class SecurityService {
         guardAt: dto.guardEnabled ? new Date() : null,
         guardBy: dto.guardEnabled ? actorId : null,
       },
-    });
-
-    await this.audit.record({
-      userId: actorId,
-      action: dto.guardEnabled ? "group.guard_on_bulk" : "group.guard_off_bulk",
-      entity: "telegram_group",
-      // ⚠️ `entityId` YO'Q: amal bitta guruhga tegishli emas.
-      entityId: null,
-      meta: {
-        count,
-        chatIds,
-        /** ⚠️ O'TKAZIB YUBORILGAN KANALLAR HAM DALIL. */
-        skippedChannels: skippedChannels.map((g) => g.chatId),
-        filter: {
-          isOfficial: dto.filterIsOfficial,
-          districtId: dto.filterDistrictId,
-          mahallaId: dto.filterMahallaId,
-          unassigned: dto.filterUnassigned,
-          search: dto.filterSearch,
-          chatType: dto.filterChatType,
-        },
-      },
-      ip,
     });
 
     this.logger.log(

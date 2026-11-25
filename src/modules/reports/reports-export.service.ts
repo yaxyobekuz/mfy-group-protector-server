@@ -32,7 +32,7 @@
  * emas — son bo'lib yozilsa Excel ularni "chiroyli" qilib buzadi.
  */
 
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 
 import type { ScopeContext } from "../../common/scope.util";
 import { chatTypeLabel, guardApplies } from "../../common/chat-type";
@@ -91,20 +91,24 @@ export class ReportsExportService {
     query: ReportQuery,
   ): Promise<ExportResult> {
     switch (kind) {
-      case "territory":
-        return this.territory(scope, query);
       case "categories":
         return this.categories(scope, query);
-      case "recurring":
-        return this.recurring(scope, query);
       case "issues":
         return this.issues(scope, query);
       case "coverage":
         return this.coverage(scope);
       case "unassigned-groups":
         return this.unassignedGroups();
+      /**
+       * ⚠️ AVVAL `default` UMUMIY KO'RINISHNI QAYTARARDI. "Hisobotlar"
+       * sahifasi olib tashlangach (2026-11-25) umumiy ko'rinish,
+       * hudud va takrorlanish kesimlari ham yo'q qilindi — jim
+       * zaxiraga tushish esa XATO bo'lardi: noto'g'ri yozilgan kesim
+       * nomi uchun odam BOSHQA hisobotni yuklab olib, buni
+       * sezmasdi.
+       */
       default:
-        return this.overview(scope, query);
+        throw new BadRequestException("Bunday hisobot kesimi yo'q");
     }
   }
 
@@ -136,52 +140,6 @@ export class ReportsExportService {
     };
   }
 
-  private async overview(scope: ScopeContext, query: ReportQuery): Promise<ExportResult> {
-    const data = await this.reports.overview(scope, query);
-
-    /**
-     * ⚠️ UMUMIY KESIM — "KO'RSATKICH / QIYMAT" USTUNLARIDA: unda har
-     * xil turdagi raqamlar bor (son, foiz, soat) va ularni bitta
-     * gorizontal qatorga tiqish Excel'da o'qib bo'lmaydigan jadval
-     * berardi.
-     */
-    const rows: unknown[][] = [
-      ["Jami murojaat", data.total],
-      ["Yangi", data.status?.new ?? 0],
-      ["Jarayonda", data.status?.in_progress ?? 0],
-      ["Hal qilingan", data.status?.resolved ?? 0],
-      ["Rad etilgan", data.status?.rejected ?? 0],
-      ["Muddati o'tgan", data.overdue],
-      ["Hal qilish ulushi (%)", data.resolutionRate ?? DASH],
-      ["O'rtacha hal qilish (soat)", data.avgResolutionHours ?? DASH],
-    ];
-
-    return this.sheet("umumiy", "Umumiy", ["Ko'rsatkich", "Qiymat"], rows);
-  }
-
-  private async territory(scope: ScopeContext, query: ReportQuery): Promise<ExportResult> {
-    const data = await this.reports.byTerritory(scope, query);
-
-    /**
-     * ⚠️ NISBIY KO'RSATKICH HAM USTUNDA: aynan u rahbariyatga
-     * kerak — "Asakada 450, Ulug'norda 50" degan mutlaq son
-     * tumanlarni solishtirishga yaramaydi.
-     */
-    const rows = data.districts.map((district) => [
-      district.name,
-      district.count,
-      district.population ?? DASH,
-      district.per1000 ?? DASH,
-    ]);
-
-    return this.sheet(
-      "tumanlar",
-      "Tumanlar",
-      ["Tuman", "Murojaat", "Aholi", "1000 kishiga"],
-      rows,
-    );
-  }
-
   private async categories(scope: ScopeContext, query: ReportQuery): Promise<ExportResult> {
     const data = await this.reports.byCategory(scope, query);
 
@@ -200,39 +158,6 @@ export class ReportsExportService {
       "yonalishlar",
       "Yo'nalishlar",
       ["Asosiy yo'nalish", "Yo'nalish", "Murojaat", "Muddati o'tgan"],
-      rows,
-    );
-  }
-
-  private async recurring(scope: ScopeContext, query: ReportQuery): Promise<ExportResult> {
-    const data = await this.reports.recurring(scope, query);
-
-    const rows = data.items.map((item) => [
-      item.district?.name ?? DASH,
-      item.mahallaName,
-      item.parentName ? `${item.parentName} → ${item.categoryName}` : item.categoryName,
-      item.total,
-      item.incidents,
-      item.duplicates,
-      item.perMonth,
-      item.firstAt ? formatDateTimeUz(item.firstAt) : DASH,
-      item.lastAt ? formatDateTimeUz(item.lastAt) : DASH,
-    ]);
-
-    return this.sheet(
-      "tizimli-muammolar",
-      "Tizimli muammolar",
-      [
-        "Tuman",
-        "MFY",
-        "Yo'nalish",
-        "Jami",
-        "Hodisa",
-        "Takroriy",
-        "Oyiga",
-        "Birinchi",
-        "Oxirgi",
-      ],
       rows,
     );
   }

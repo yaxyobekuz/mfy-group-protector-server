@@ -149,7 +149,6 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
         hint: "Ruxsat va hududiy qamrov ham shu yerdan beriladi.",
       },
       { key: "settings.manage", label: "Sozlamalar" },
-      { key: "audit.view", label: "Audit jurnali" },
     ],
   },
 ];

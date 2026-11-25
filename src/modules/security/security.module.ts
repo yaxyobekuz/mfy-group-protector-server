@@ -1,6 +1,5 @@
 import { Module } from "@nestjs/common";
 
-import { AuditService } from "../../common/audit.service";
 import { BotSecurityController, SecurityController } from "./security.controller";
 import { SecurityService } from "./security.service";
 import { ThreatFeedsService } from "./threat-feeds.service";
@@ -13,7 +12,7 @@ import { ThreatFeedsService } from "./threat-feeds.service";
  */
 @Module({
   controllers: [SecurityController, BotSecurityController],
-  providers: [SecurityService, ThreatFeedsService, AuditService],
+  providers: [SecurityService, ThreatFeedsService],
   exports: [SecurityService, ThreatFeedsService],
 })
 export class SecurityModule {}

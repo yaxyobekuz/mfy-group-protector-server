@@ -15,7 +15,6 @@
 import { Injectable } from "@nestjs/common";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import type { Settings } from "@prisma/client";
 import type { UpdateSettingsDto } from "./dto/settings.dto";
 import { normalizeHost } from "../security/threat-rules";
@@ -38,7 +37,6 @@ const normalizeHosts = (hosts: string[]): string[] => [
 export class SettingsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
   ) {}
 
   /** Sozlamalar — qator bo'lmasa standart qiymatlar bilan yaratiladi. */
@@ -104,23 +102,6 @@ export class SettingsService {
           : {}),
         ...(dto.requirePhone !== undefined ? { requirePhone: dto.requirePhone } : {}),
         updatedBy: userId,
-      },
-    });
-
-    await this.audit.record({
-      userId,
-      action: "settings.update",
-      entity: "Settings",
-      entityId: SINGLETON_ID,
-      // ⚠️ ESKI VA YANGI QIYMAT IKKALASI yoziladi: "AI nima uchun
-      // o'chib qolgan" degan savolga javob faqat shundan topiladi.
-      meta: {
-        before: {
-          aiEnabled: before.aiEnabled,
-          aiIntervalMinutes: before.aiIntervalMinutes,
-          alertChatIds: before.alertChatIds,
-        },
-        after: dto as Record<string, unknown>,
       },
     });
 

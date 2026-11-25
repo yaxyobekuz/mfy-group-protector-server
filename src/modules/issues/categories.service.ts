@@ -13,14 +13,12 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import type { CreateCategoryDto, UpdateCategoryDto } from "./dto/issues.dto";
 
 @Injectable()
 export class CategoriesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -127,14 +125,6 @@ export class CategoriesService {
       },
     });
 
-    await this.audit.record({
-      userId,
-      action: "issue_category.create",
-      entity: "IssueCategory",
-      entityId: category.id,
-      meta: { name: category.name },
-    });
-
     return category;
   }
 
@@ -162,14 +152,6 @@ export class CategoriesService {
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
       },
-    });
-
-    await this.audit.record({
-      userId,
-      action: "issue_category.update",
-      entity: "IssueCategory",
-      entityId: id,
-      meta: { before: { name: existing.name, isActive: existing.isActive }, after: dto },
     });
 
     return category;
@@ -200,14 +182,6 @@ export class CategoriesService {
     const updated = await this.prisma.issueCategory.update({
       where: { id },
       data: { isActive: false },
-    });
-
-    await this.audit.record({
-      userId,
-      action: "issue_category.deactivate",
-      entity: "IssueCategory",
-      entityId: id,
-      meta: { name: category.name },
     });
 
     return updated;

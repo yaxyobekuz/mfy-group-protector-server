@@ -1,7 +1,6 @@
 import { Module } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 
-import { AuditService } from "../../common/audit.service";
 import { IssuesModule } from "../issues/issues.module";
 import { UploadsModule } from "../uploads/uploads.module";
 import { BotCitizensController } from "./bot-citizens.controller";
@@ -43,7 +42,6 @@ import { MobileService } from "./mobile.service";
     MobileAiService,
     AppleTokenService,
     BotCitizensService,
-    AuditService,
   ],
 })
 export class MobileModule {}

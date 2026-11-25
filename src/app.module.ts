@@ -21,7 +21,6 @@ import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { PermissionsGuard } from "./common/guards/permissions.guard";
 import { AppThrottlerGuard } from "./common/guards/throttler.guard";
 import { THROTTLER_CONFIG } from "./common/throttle";
-import { AuditService } from "./common/audit.service";
 import { AuthModule } from "./modules/auth/auth.module";
 import { UsersModule } from "./modules/users/users.module";
 import { TerritoryModule } from "./modules/territory/territory.module";
@@ -31,7 +30,6 @@ import { SignalsModule } from "./modules/signals/signals.module";
 import { IssuesModule } from "./modules/issues/issues.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { SettingsModule } from "./modules/settings/settings.module";
-import { AuditModule } from "./modules/audit/audit.module";
 import { MobileModule } from "./modules/mobile/mobile.module";
 import { AnnouncementsModule } from "./modules/announcements/announcements.module";
 import { BroadcastsModule } from "./modules/broadcasts/broadcasts.module";
@@ -65,7 +63,6 @@ import { LegalModule } from "./modules/legal/legal.module";
     SignalsModule,
     ReportsModule,
     SettingsModule,
-    AuditModule,
     MobileModule,
     AnnouncementsModule,
     CitizensModule,
@@ -76,7 +73,6 @@ import { LegalModule } from "./modules/legal/legal.module";
     HealthModule,
   ],
   providers: [
-    AuditService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     /**

@@ -30,7 +30,6 @@ import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 
 /**
  * Bitta aylanishda nashr etiladigan eng ko'p e'lon.
@@ -54,7 +53,6 @@ export class AnnouncementsJob {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -107,27 +105,6 @@ export class AnnouncementsJob {
         });
 
         if (result.count === 0) continue;
-
-        await this.audit.record({
-          /**
-           * ⚠️ `userId` — E'LONNI YARATGAN XODIM, `null` EMAS:
-           * nashr qarorini AYNAN U qilgan, job esa faqat
-           * vaqtini kutgan. `null` bo'lsa, "bu e'lonni kim
-           * chiqardi" degan savolga javob yo'qolardi.
-           */
-          userId: item.createdBy,
-          action: "announcement.publish",
-          entity: "Announcement",
-          entityId: item.id,
-          meta: {
-            title: item.title,
-            scheduledAt: item.scheduledAt,
-            /** Rejalashtirilgan vaqtdan qancha kechikdi (daqiqa). */
-            delayMinutes: item.scheduledAt
-              ? Math.round((now.getTime() - item.scheduledAt.getTime()) / 60000)
-              : null,
-          },
-        });
 
         this.logger.log(`E'lon nashr etildi: ${item.title}`);
       } catch (error) {

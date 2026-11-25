@@ -43,7 +43,6 @@ import {
 
 import { ScopeKind } from "@prisma/client";
 
-import { AuditService } from "../../common/audit.service";
 import {
   canTouchDistrict,
   districtScopeWhere,
@@ -68,7 +67,6 @@ export class AssignmentRulesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -318,19 +316,6 @@ export class AssignmentRulesService {
       select: { id: true, userId: true, slaHours: true },
     });
 
-    await this.audit.record({
-      userId: scope.userId,
-      action: "issue.assignment-rule.save",
-      entity: "MahallaAssignee",
-      entityId: rule.id,
-      meta: {
-        mahalla: mahalla.name,
-        category: category.name,
-        user: `${user.firstName} ${user.lastName}`.trim(),
-        slaHours: dto.slaHours ?? null,
-      },
-    });
-
     return rule;
   }
 
@@ -339,7 +324,7 @@ export class AssignmentRulesService {
    *
    * ⚠️ HAQIQIY O'CHIRISH, `isActive: false` EMAS: qoida — SOZLAMA,
    * dalil emas. "Kim qachon qo'ygan, kim olib tashlagan" savoliga
-   * javob `AuditLog` da qoladi.
+   * javob jurnalga yozilmaydi (audit olib tashlandi).
    */
   async remove(id: string, scope: ScopeContext) {
     const rule = await this.prisma.mahallaAssignee.findUnique({
@@ -357,14 +342,6 @@ export class AssignmentRulesService {
     }
 
     await this.prisma.mahallaAssignee.delete({ where: { id } });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: "issue.assignment-rule.remove",
-      entity: "MahallaAssignee",
-      entityId: id,
-      meta: { mahalla: rule.mahalla.name, category: rule.category.name },
-    });
 
     return { ok: true };
   }

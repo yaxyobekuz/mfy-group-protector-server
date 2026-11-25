@@ -41,7 +41,6 @@ import {
 } from "@nestjs/common";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import {
   CHANNEL_TYPE,
   guardApplies,
@@ -86,7 +85,6 @@ export class GroupsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════
@@ -230,26 +228,6 @@ export class GroupsService {
 
       if (!action) return;
 
-      await this.audit.record({
-        /**
-         * ⚠️ `userId` — `null`: bu amalni XODIM qilmagan. Uni
-         * biror xodimga yozib qo'yish auditni soxtalashtirardi
-         * ("kim chiqarib tashladi" degan savolga yolg'on javob).
-         */
-        userId: null,
-        action,
-        entity: "TelegramGroup",
-        entityId: dto.chatId,
-        meta: {
-          title: dto.title?.trim() || before?.title || dto.chatId,
-          type: dto.type,
-          from: before?.status ?? null,
-          to: dto.status,
-          canDeleteMessages: dto.canDeleteMessages ?? false,
-          /** Kim chiqarib tashlagani — Telegram bersa. */
-          actorTgId: dto.addedByTgId ?? null,
-        },
-      });
     } catch (error) {
       this.logger.warn(
         `A'zolik auditi yozilmadi (${dto.chatId}): ${(error as Error).message}`,
@@ -470,14 +448,6 @@ export class GroupsService {
       },
     });
 
-    await this.audit.record({
-      userId: scope.userId,
-      action: dto.isOfficial ? "group.official_on" : "group.official_off",
-      entity: "TelegramGroup",
-      entityId: chatId,
-      meta: { title: group.title, mahallaId: group.mahallaId },
-    });
-
     // ⚠️ BELGI OLINGANDA NAVBAT TOZALANADI: rozilik qaytarib
     // olingandan keyin tahlil qilinmagan xabarlarni saqlab qolish
     // "o'qimaymiz" degan qarorga qarshi bo'lardi. Tahlil
@@ -571,28 +541,6 @@ export class GroupsService {
         isOfficial: dto.isOfficial,
         officialAt: dto.isOfficial ? now : null,
         officialBy: dto.isOfficial ? scope.userId : null,
-      },
-    });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: dto.isOfficial ? "group.official_on_bulk" : "group.official_off_bulk",
-      entity: "TelegramGroup",
-      // ⚠️ `entityId` YO'Q: amal bitta guruhga tegishli emas va
-      // bittasining id'sini yozish jurnalda adashtirardi.
-      entityId: null,
-      meta: {
-        count,
-        chatIds,
-        skippedNoMahalla: skippedNoMahalla.map((g) => g.chatId),
-        filter: {
-          isOfficial: dto.filterIsOfficial,
-          districtId: dto.filterDistrictId,
-          mahallaId: dto.filterMahallaId,
-          unassigned: dto.filterUnassigned,
-          search: dto.filterSearch,
-          chatType: dto.filterChatType,
-        },
       },
     });
 
@@ -698,14 +646,6 @@ export class GroupsService {
           select: { id: true, name: true, district: { select: { id: true, name: true } } },
         },
       },
-    });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: "group.assign_mahalla",
-      entity: "TelegramGroup",
-      entityId: chatId,
-      meta: { before: group.mahallaId, after: mahallaId },
     });
 
     return { chatId: updated.chatId, mahalla: updated.mahalla };

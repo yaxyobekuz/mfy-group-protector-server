@@ -26,7 +26,6 @@ import {
 import { IssueSource, IssueStatus, type Prisma } from "@prisma/client";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import {
   DELETED_CITIZEN_NAME,
   activeCitizenWhere,
@@ -92,7 +91,6 @@ export class MobileService {
     private readonly uploads: UploadsService,
     private readonly ai: MobileAiService,
     private readonly appleTokens: AppleTokenService,
-    private readonly audit: AuditService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════
@@ -307,7 +305,7 @@ export class MobileService {
 
     /**
      * ⚠️ AUDIT — TRANZAKSIYADAN KEYIN va `userId: null`: amalni XODIM
-     * emas, FUQARONING O'ZI qildi (`AuditLog.userId` — xodim ustuni).
+     * emas, FUQARONING O'ZI qildi.
      * Kim o'chirgani `entityId` da qoladi, ya'ni "bu hisob nega
      * anonim?" degan savolga javob bor.
      *
@@ -315,17 +313,6 @@ export class MobileService {
      * tozalagan ism/pochta audit jurnalida QOLIB ketardi va butun
      * amal ma'nosiz bo'lardi. Faqat texnik faktlar.
      */
-    await this.audit.record({
-      userId: null,
-      action: "citizen.self_delete",
-      entity: "Citizen",
-      entityId: citizenId,
-      meta: {
-        appleRevoked,
-        appleTokenHad: Boolean(citizen.appleRefreshToken),
-      },
-      ip: ip ?? null,
-    });
   }
 
   async updateProfile(citizenId: string, dto: UpdateProfileDto) {

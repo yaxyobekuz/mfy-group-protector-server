@@ -1,6 +1,5 @@
 import { Module } from "@nestjs/common";
 
-import { AuditService } from "../../common/audit.service";
 import { CategoriesController, IssuesController } from "./issues.controller";
 import { AppealTriageService } from "./appeal-triage.service";
 import { AssignmentRulesService } from "./assignment-rules.service";
@@ -25,7 +24,6 @@ import { IssuesService } from "./issues.service";
     IssueNotifyService,
     AssignmentRulesService,
     AppealTriageService,
-    AuditService,
   ],
   // ⚠️ `IssuesService` EKSPORT QILINADI: `signals` moduli signalni
   // muammoga aylantirishda shuni chaqiradi. Yaratish mantig'i

@@ -24,7 +24,6 @@ import {
 } from "@nestjs/common";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import { AuthService } from "../auth/auth.service";
 import {
   ROLE_DEFAULT_PERMISSIONS,
@@ -49,7 +48,6 @@ import type {
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
     private readonly auth: AuthService,
   ) {}
 
@@ -150,14 +148,6 @@ export class UsersService {
       select: { id: true, username: true, firstName: true, lastName: true, role: true },
     });
 
-    await this.audit.record({
-      userId: scope.userId,
-      action: "user.create",
-      entity: "User",
-      entityId: user.id,
-      meta: { username: user.username, role: dto.role, scopeKind: dto.scopeKind },
-    });
-
     return user;
   }
 
@@ -221,21 +211,6 @@ export class UsersService {
       select: { id: true, username: true, role: true, scopeKind: true, isActive: true },
     });
 
-    await this.audit.record({
-      userId: scope.userId,
-      action: "user.update",
-      entity: "User",
-      entityId: id,
-      meta: {
-        before: {
-          role: existing.role,
-          scopeKind: existing.scopeKind,
-          permissions: existing.permissions,
-        },
-        after: dto as Record<string, unknown>,
-      },
-    });
-
     // ⚠️ RUXSAT YOKI QAMROV O'ZGARSA SESSIYALAR YOPILMAYDI va bu
     // ataylab: `JwtAuthGuard` ruxsatni HAR SO'ROVDA bazadan o'qiydi,
     // ya'ni yangi ruxsat darhol amal qiladi. Sessiyani yopish esa
@@ -282,14 +257,6 @@ export class UsersService {
 
     if (archived) await this.auth.revokeAll(id);
 
-    await this.audit.record({
-      userId: scope.userId,
-      action: archived ? "user.archive" : "user.restore",
-      entity: "User",
-      entityId: id,
-      meta: { username: existing.username },
-    });
-
     return user;
   }
 
@@ -322,14 +289,6 @@ export class UsersService {
     });
 
     await this.auth.revokeAll(id);
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: "user.reset_password",
-      entity: "User",
-      entityId: id,
-      meta: { username: existing.username },
-    });
 
     return { ok: true as const };
   }

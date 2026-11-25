@@ -45,7 +45,6 @@ import {
 } from "@nestjs/common";
 import { BroadcastAudience, BroadcastMode, BroadcastStatus } from "@prisma/client";
 
-import { AuditService } from "../../common/audit.service";
 import { activeCitizenWhere } from "../../common/citizen-deleted";
 import { paginate, type Paginated } from "../../common/dto/pagination.dto";
 import { canTouchDistrict, districtScopeWhere, isProvinceWide, type ScopeContext } from "../../common/scope.util";
@@ -88,7 +87,6 @@ export class BroadcastsService implements OnModuleInit {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -344,20 +342,6 @@ export class BroadcastsService implements OnModuleInit {
         via,
       },
       select: { id: true, status: true, createdAt: true },
-    });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: "broadcast.send",
-      entity: "Broadcast",
-      entityId: broadcast.id,
-      meta: {
-        audience: dto.audience,
-        mode: dto.mode,
-        districtId,
-        mahallaId,
-        via,
-      },
     });
 
     void this.run(broadcast.id).catch((error: Error) => {

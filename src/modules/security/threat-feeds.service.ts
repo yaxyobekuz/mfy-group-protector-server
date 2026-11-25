@@ -46,7 +46,6 @@ import {
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { ThreatFeedFormat } from "@prisma/client";
 
-import { AuditService } from "../../common/audit.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { normalizeHost } from "./threat-rules";
 
@@ -135,7 +134,6 @@ export class ThreatFeedsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════
@@ -425,14 +423,6 @@ export class ThreatFeedsService {
     await this.prisma.threatFeed.update({ where: { id }, data: { isEnabled } });
     this.invalidate();
 
-    await this.audit.record({
-      userId,
-      action: isEnabled ? "threat_feed.enable" : "threat_feed.disable",
-      entity: "ThreatFeed",
-      entityId: id,
-      meta: { name: feed.name },
-    });
-
     return { ok: true };
   }
 
@@ -450,14 +440,6 @@ export class ThreatFeedsService {
       select: { id: true, name: true },
     });
     if (!feed) throw new NotFoundException("Ro'yxat topilmadi");
-
-    await this.audit.record({
-      userId,
-      action: "threat_feed.refresh",
-      entity: "ThreatFeed",
-      entityId: id,
-      meta: { name: feed.name },
-    });
 
     /**
      * ⚠️ KUTILMAYDI (`void`), VA BU TIRIK O'LCHOVDAN: GitHub'dagi

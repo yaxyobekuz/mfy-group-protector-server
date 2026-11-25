@@ -13,7 +13,6 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from "@nes
 import { IssueStatus, type Prisma } from "@prisma/client";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import { activeCitizenWhere } from "../../common/citizen-deleted";
 import { paginate } from "../../common/dto/pagination.dto";
 import { districtScopeWhere, type ScopeContext } from "../../common/scope.util";
@@ -30,7 +29,6 @@ export class CitizensService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
   ) {}
 
   async list(query: ListCitizensQuery) {
@@ -233,14 +231,6 @@ export class CitizensService {
         isBlocked: dto.blocked,
         blockReason: dto.blocked ? dto.reason!.trim() : null,
       },
-    });
-
-    await this.audit.record({
-      userId,
-      action: dto.blocked ? "citizen.block" : "citizen.unblock",
-      entity: "Citizen",
-      entityId: id,
-      meta: dto.blocked ? { reason: dto.reason } : undefined,
     });
 
     return { ok: true };

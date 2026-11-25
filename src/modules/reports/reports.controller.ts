@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Res } from "@nestjs/common";
+import { Controller, Get, Param, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 
 import {
@@ -10,41 +10,21 @@ import { toScope } from "../../common/scope.util";
 import { XLSX_MIME } from "../../common/xlsx";
 import { ReportsService } from "./reports.service";
 import { ReportsExportService } from "./reports-export.service";
-import { ReportsAiService } from "./reports-ai.service";
 import { ReportsCoverageService } from "./reports-coverage.service";
-import { AssistantBody, DailyQuery, ReportQuery } from "./dto/reports.dto";
+import { DailyQuery, ReportQuery } from "./dto/reports.dto";
 
 @Controller("reports")
 export class ReportsController {
   constructor(
     private readonly reports: ReportsService,
     private readonly exporter: ReportsExportService,
-    private readonly assistant: ReportsAiService,
     private readonly coverage: ReportsCoverageService,
   ) {}
-
-  @Get("overview")
-  @RequirePermissions("reports.view")
-  overview(@CurrentUser() user: RequestUser, @Query() query: ReportQuery) {
-    return this.reports.overview(toScope(user), query);
-  }
-
-  @Get("territory")
-  @RequirePermissions("reports.view")
-  byTerritory(@CurrentUser() user: RequestUser, @Query() query: ReportQuery) {
-    return this.reports.byTerritory(toScope(user), query);
-  }
 
   @Get("categories")
   @RequirePermissions("reports.view")
   byCategory(@CurrentUser() user: RequestUser, @Query() query: ReportQuery) {
     return this.reports.byCategory(toScope(user), query);
-  }
-
-  @Get("signals")
-  @RequirePermissions("reports.view")
-  signals(@CurrentUser() user: RequestUser, @Query() query: ReportQuery) {
-    return this.reports.signalMetrics(toScope(user), query);
   }
 
   /** Mini App (fuqaro murojaatlari) analitikasi. */
@@ -143,12 +123,6 @@ export class ReportsController {
     return this.coverage.mahallaCoverage(toScope(user));
   }
 
-  @Get("recurring")
-  @RequirePermissions("reports.view")
-  recurring(@CurrentUser() user: RequestUser, @Query() query: ReportQuery) {
-    return this.reports.recurring(toScope(user), query);
-  }
-
   /**
    * HISOBOTNI XLSX QILIB YUKLAB OLISH.
    *
@@ -230,21 +204,4 @@ export class ReportsController {
     response.end(file);
   }
 
-  /**
-   * HISOBOT YORDAMCHISI — KO'RSATKICH BO'YICHA SAVOL.
-   *
-   * ⚠️ `POST`, `GET` EMAS: savol 500 belgigacha bo'lishi mumkin va
-   * uzun query satri proksi (nginx) chegarasiga urilardi — xato esa
-   * 414 bo'lib, sababi tushunarsiz ko'rinardi.
-   *
-   * ⚠️ RUXSAT — `reports.view`: yordamchi YANGI ma'lumot
-   * ko'rsatmaydi, u xodim allaqachon ko'ra oladigan raqamlarni
-   * izohlaydi. Alohida ruxsat qo'shilsa, u hech kimga berilmay,
-   * funksiya o'lik qolardi.
-   */
-  @Post("assistant")
-  @RequirePermissions("reports.view")
-  assistantAsk(@CurrentUser() user: RequestUser, @Body() body: AssistantBody) {
-    return this.assistant.ask(body.question, toScope(user), body);
-  }
 }

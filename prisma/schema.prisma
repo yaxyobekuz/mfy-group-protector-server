@@ -1129,34 +1129,6 @@ model Settings {
   @@map("settings")
 }
 
-/// AUDIT — kim nima qildi.
-///
-/// ⚠️ FAQAT MUHIM AMALLAR yoziladi, har so'rov emas: login, ruxsat
-/// o'zgarishi, guruhni rasmiy qilish, signalni biriktirish/yopish,
-/// muammo holati. "Hamma narsani yozish" jurnalni o'qib bo'lmaydigan
-/// qilardi va u o'shandan keyin hech kimga kerak bo'lmasdi.
-model AuditLog {
-  id String @id @default(cuid())
-
-  userId   String? @map("user_id")
-  /// "auth.login", "group.official", "signal.attach", "issue.resolve"
-  action   String
-  /// Qaysi obyekt ustida.
-  entity   String?
-  entityId String? @map("entity_id")
-
-  /// Qo'shimcha kontekst (eski/yangi qiymat).
-  meta Json?
-
-  ip        String?
-  createdAt DateTime @default(now()) @map("created_at")
-
-  @@index([userId, createdAt(sort: Desc)])
-  @@index([action, createdAt(sort: Desc)])
-  @@index([entity, entityId])
-  @@map("audit_logs")
-}
-
 // ═══════════════════════════════════════════════════════════════════
 //  XAVFSIZLIK — guruhga tashlangan zararli fayl va havolalar
 // ═══════════════════════════════════════════════════════════════════

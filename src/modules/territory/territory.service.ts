@@ -23,7 +23,6 @@ import {
 import type { Prisma } from "@prisma/client";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import {
   canTouchDistrict,
   districtScopeWhere,
@@ -44,7 +43,6 @@ import type {
 export class TerritoryService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════
@@ -134,14 +132,6 @@ export class TerritoryService {
       },
     });
 
-    await this.audit.record({
-      userId: scope.userId,
-      action: "territory.district_create",
-      entity: "District",
-      entityId: district.id,
-      meta: { code: district.code, name: district.name },
-    });
-
     return district;
   }
 
@@ -164,14 +154,6 @@ export class TerritoryService {
         ...(dto.population !== undefined ? { population: dto.population } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
       },
-    });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: "territory.district_update",
-      entity: "District",
-      entityId: id,
-      meta: { before: { code: existing.code, name: existing.name }, after: dto },
     });
 
     return district;
@@ -210,13 +192,6 @@ export class TerritoryService {
     const updated = await this.prisma.district.update({
       where: { id },
       data: { isArchived: archived, archivedAt: archived ? new Date() : null },
-    });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: archived ? "territory.district_archive" : "territory.district_restore",
-      entity: "District",
-      entityId: id,
     });
 
     return updated;
@@ -338,13 +313,6 @@ export class TerritoryService {
       updated += 1;
     }
 
-    await this.audit.record({
-      userId: scope.userId,
-      action: "territory.import-geo",
-      entity: "Mahalla",
-      meta: { updated, missing: missing.length },
-    });
-
     return { updated, missing };
   }
 
@@ -417,13 +385,6 @@ export class TerritoryService {
       updated += 1;
     }
 
-    await this.audit.record({
-      userId,
-      action: "territory.import-geo",
-      entity: "District",
-      meta: { updated, missing: missing.length },
-    });
-
     return { updated, missing };
   }
 
@@ -442,13 +403,6 @@ export class TerritoryService {
     await this.prisma.settings.update({
       where: { id: "singleton" },
       data: { provinceGeoJson: geoJson as Prisma.InputJsonValue },
-    });
-
-    await this.audit.record({
-      userId,
-      action: "territory.import-geo",
-      entity: "Settings",
-      meta: { province: true },
     });
 
     return { ok: true };
@@ -569,14 +523,6 @@ export class TerritoryService {
       include: { district: { select: { id: true, name: true } } },
     });
 
-    await this.audit.record({
-      userId: scope.userId,
-      action: "territory.mahalla_create",
-      entity: "Mahalla",
-      entityId: mahalla.id,
-      meta: { code: mahalla.code, name: mahalla.name, districtId: dto.districtId },
-    });
-
     return mahalla;
   }
 
@@ -615,13 +561,6 @@ export class TerritoryService {
       include: { district: { select: { id: true, name: true } } },
     });
 
-    await this.audit.record({
-      userId: scope.userId,
-      action: "territory.mahalla_update",
-      entity: "Mahalla",
-      entityId: id,
-    });
-
     return mahalla;
   }
 
@@ -648,13 +587,6 @@ export class TerritoryService {
     const mahalla = await this.prisma.mahalla.update({
       where: { id },
       data: { isArchived: archived, archivedAt: archived ? new Date() : null },
-    });
-
-    await this.audit.record({
-      userId: scope.userId,
-      action: archived ? "territory.mahalla_archive" : "territory.mahalla_restore",
-      entity: "Mahalla",
-      entityId: id,
     });
 
     return mahalla;

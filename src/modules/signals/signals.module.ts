@@ -1,6 +1,5 @@
 import { Module } from "@nestjs/common";
 
-import { AuditService } from "../../common/audit.service";
 import { IssuesModule } from "../issues/issues.module";
 import { SettingsModule } from "../settings/settings.module";
 import { SignalAiService } from "./ai/signal-ai.service";
@@ -18,7 +17,7 @@ import { SignalsService } from "./signals.service";
 @Module({
   imports: [IssuesModule, SettingsModule],
   controllers: [SignalsController],
-  providers: [SignalsService, SignalAiService, SignalsJob, AuditService],
+  providers: [SignalsService, SignalAiService, SignalsJob],
   exports: [SignalsService],
 })
 export class SignalsModule {}

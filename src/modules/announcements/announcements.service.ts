@@ -10,7 +10,6 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import type { Prisma } from "@prisma/client";
 
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import { paginate } from "../../common/dto/pagination.dto";
 import { UploadsService } from "../uploads/uploads.service";
 import type {
@@ -23,7 +22,6 @@ import type {
 export class AnnouncementsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
     private readonly uploads: UploadsService,
   ) {}
 
@@ -103,24 +101,6 @@ export class AnnouncementsService {
         ...(media.length > 0 ? { media: { create: media } } : {}),
       },
       select: { id: true },
-    });
-
-    await this.audit.record({
-      userId,
-      /**
-       * ⚠️ REJALASHTIRISH ALOHIDA AMAL SIFATIDA YOZILADI: auditda
-       * "yangilik qo'shdi" degan yozuv e'lon QACHON chiqishini
-       * aytmasdi — va noto'g'ri sanaga qo'yilgan e'lonning sababini
-       * keyin topib bo'lmasdi.
-       */
-      action: scheduledAt ? "announcement.schedule" : "announcement.create",
-      entity: "Announcement",
-      entityId: created.id,
-      meta: {
-        published: Boolean(dto.publish),
-        scheduledAt,
-        mediaCount: media.length,
-      },
     });
 
     return created;
@@ -205,19 +185,6 @@ export class AnnouncementsService {
       select: { id: true },
     });
 
-    await this.audit.record({
-      userId,
-      action: scheduledAt ? "announcement.schedule" : "announcement.update",
-      entity: "Announcement",
-      entityId: id,
-      meta: {
-        scheduledAt,
-        cancelSchedule: Boolean(dto.cancelSchedule),
-        mediaAdded: media.length,
-        mediaRemoved: dto.removeMedia?.length ?? 0,
-      },
-    });
-
     return updated;
   }
 
@@ -229,13 +196,6 @@ export class AnnouncementsService {
     if (!existing) throw new NotFoundException("E'lon topilmadi");
 
     await this.prisma.announcement.delete({ where: { id } });
-
-    await this.audit.record({
-      userId,
-      action: "announcement.delete",
-      entity: "Announcement",
-      entityId: id,
-    });
 
     return { ok: true };
   }

@@ -36,7 +36,6 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { env } from "../../config/env.config";
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../../common/audit.service";
 import { ROLE_DEFAULT_PERMISSIONS } from "../../common/permissions";
 
 /**
@@ -80,7 +79,6 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
-    private readonly audit: AuditService,
   ) {}
 
   /** Parolni hash qiladi — xodim yaratish/parol almashtirishda. */
@@ -113,11 +111,6 @@ export class AuthService {
     const valid = await argon2.verify(user.passwordHash, password).catch(() => false);
 
     if (!valid) {
-      await this.audit.record({
-        userId: user.id,
-        action: "auth.login_failed",
-        ip: meta.ip,
-      });
       // ⚠️ "PAROL XATO" DEYILMAYDI — bu loginning mavjudligini
       // tasdiqlardi va ro'yxat to'plashga yo'l ochardi.
       throw new UnauthorizedException("Login yoki parol xato");
@@ -132,13 +125,6 @@ export class AuthService {
     await this.prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
-    });
-
-    await this.audit.record({
-      userId: user.id,
-      action: "auth.login",
-      ip: meta.ip,
-      meta: { userAgent: meta.userAgent ?? null },
     });
 
     return {
@@ -197,12 +183,6 @@ export class AuthService {
     // shuning uchun IKKALASINI ham yopamiz — xodim qaytib kiradi.
     if (session.revokedAt) {
       await this.revokeAll(session.userId);
-      await this.audit.record({
-        userId: session.userId,
-        action: "auth.refresh_reuse",
-        ip: meta.ip,
-        meta: { note: "Bekor qilingan token qayta ishlatildi — barcha sessiya yopildi" },
-      });
       this.logger.warn(
         `Refresh token qayta ishlatildi (user=${session.userId}) — barcha sessiya yopildi`,
       );
