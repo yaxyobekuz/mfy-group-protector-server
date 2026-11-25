@@ -348,22 +348,60 @@ export class SignalsService {
           /**
            * ── 1. SHOVQIN FILTRI ────────────────────────────────────
            *
-           * ⚠️ MODEL JAVOBIDAN KEYIN, LEKIN BAZADAN OLDIN. Nega
+           * ⚠️ MODEL JAVOBIDAN KEYIN, LEKIN PANELDAN OLDIN. Nega
            * umuman kerak — `signal-noise.filter.ts` izohiga qara:
            * promptdagi taqiqlar bir kun sinalib, ishlamagani
            * O'LCHANGAN.
            *
-           * ⚠️ TO'SILGANI LOGGA CHIQADI, `debug` darajasida: kuniga
-           * yuzlab yozuv bo'ladi va `log` ga chiqarilsa jurnalni
-           * ko'mib tashlardi. Lekin UMUMAN yozmaslik ham xato —
-           * filtr nimani qirqayotganini tekshirib bo'lmasdi.
+           * ⚠️ TASHLANMAYDI, `dismissed` BO'LIB YOZILADI — va bu
+           * loyihaning MAVJUD doktrinasi (`schema.prisma`,
+           * `dismissedBy` izohi): "e'tiborsiz qoldirilgan signal
+           * O'CHIRILMAYDI: AI nimani noto'g'ri topganini ko'rish
+           * kerak (prompt shunga qarab tuzatiladi)". Panel standart
+           * holda faqat `new` ni ko'rsatadi, ya'ni bu yozuvlar ishga
+           * XALAQIT BERMAYDI.
+           *
+           * ⚠️ AVVAL `logger.debug` BILAN YOZILGAN EDI VA U
+           * PRODUCTION'DA UMUMAN CHIQMAYDI (tekshirildi: jurnalda 0
+           * marta). Ya'ni filtr nimani qirqayotganini keyinchalik
+           * BILIB BO'LMASDI — holbuki chegarani yumshatish yoki
+           * qattiqlashtirish uchun aynan shu ro'yxat kerak.
+           * Sanoqchi (`filtered`) umumiy sonni beradi, lekin
+           * "NIMA qirqildi" degan savolga javob bermaydi.
+           *
+           * ⚠️ TO'SIQQA QO'SHILMAYDI (`guard.prints` / `guard.topics`):
+           * shovqin yozuvi OCHIQ signal emas. Qo'shilsa, o'sha
+           * mavzudagi HAQIQIY shikoyat "takror" deb yopilardi.
            */
           const noise = detectNoise(signal.summary);
           if (noise) {
             filtered += 1;
-            this.logger.debug(
-              `shovqin [${noise}] ${chatId}#${signal.messageId}: ${signal.summary.slice(0, 60)}`,
-            );
+            try {
+              await this.prisma.groupSignal.create({
+                data: {
+                  chatId: signal.chatId,
+                  messageId: signal.messageId,
+                  kind: signal.kind,
+                  severity: signal.severity,
+                  summary: signal.summary,
+                  categoryId: signal.categoryId,
+                  senderTgId: signal.senderTgId,
+                  senderName: signal.senderName,
+                  sentAt: signal.sentAt,
+                  messageCount: result.consumed.length,
+                  model: result.model,
+                  status: SignalStatus.dismissed,
+                  dismissedAt: new Date(),
+                  // ⚠️ `dismissedBy` — `null`: buni ODAM yopmagan.
+                  // Shu farq bo'yicha "AI nimani qirqdi" va
+                  // "operator nimani rad etdi" ajratiladi.
+                  dismissedReason: `avtomatik filtr: ${noise}`,
+                },
+              });
+            } catch (error) {
+              // Shovqin yozuvi yozilmasa tahlil to'xtamaydi.
+              this.logger.warn(`Shovqin yozilmadi: ${(error as Error).message}`);
+            }
             continue;
           }
 
