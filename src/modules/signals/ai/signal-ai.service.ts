@@ -31,6 +31,7 @@ import {
   MODEL,
   PRODUCIBLE_KINDS,
   SIGNALS_SCHEMA,
+  SUGGESTION_MIN_SEVERITY,
   SYSTEM_PROMPT,
 } from "./signal-ai.constants";
 
@@ -488,6 +489,35 @@ export class SignalAiService {
 
     const severity = String(raw.severity ?? "").trim();
 
+    const resolvedSeverity = VALID_SEVERITIES.has(severity)
+      ? (severity as SignalSeverity)
+      : SignalSeverity.normal;
+
+    /**
+     * ⚠️ PAST VA O'RTA DARAJADAGI TAKLIF OLINMAYDI — sozlama
+     * qarori, izoh `SUGGESTION_MIN_SEVERITY` da. Promptda ham
+     * aytilgan, lekin prompt KAFOLAT EMAS (`qwen3.5` ko'rsatmani
+     * taxminan bajaradi) — ishonchli tekshiruv SHU YERDA, `kind`
+     * tekshiruvidagi ayni mantiq bilan.
+     *
+     * ⚠️ SHIKOYATGA TEGISHLI EMAS: `complaint` har qanday
+     * jiddiylikda yoziladi. Chegara FAQAT taklifga qo'yilgan,
+     * chunki past darajali taklif — fikr, hal qilinishi kerak
+     * bo'lgan muammo emas.
+     *
+     * ⚠️ SANOQCHI YO'Q, ATAYLAB: bu `question` toifasini tashlash
+     * bilan ayni narsa — model ishlab chiqarmasligi KERAK bo'lgan
+     * yozuv, shovqin emas. Shuning uchun `filtered` ga
+     * qo'shilmaydi (u "shovqin" degan BOSHQA o'lchov) va jim
+     * tashlanadi.
+     */
+    if (
+      kind === SignalKind.suggestion &&
+      resolvedSeverity !== SUGGESTION_MIN_SEVERITY
+    ) {
+      return null;
+    }
+
     /**
      * ⚠️ BEGONA YO'NALISH SIGNALNI O'LDIRMAYDI, `null` ga tushadi.
      * Bu `messageId` dan FARQLI muomala va farq ataylab:
@@ -511,9 +541,7 @@ export class SignalAiService {
       chatId: source.chatId,
       messageId,
       kind: kind as SignalKind,
-      severity: VALID_SEVERITIES.has(severity)
-        ? (severity as SignalSeverity)
-        : SignalSeverity.normal,
+      severity: resolvedSeverity,
       categoryId,
       // Xabarning o'zi. Juda uzun bo'lsa kesiladi — to'lig'i havolada.
       // ⚠️ `truncate` — bazaga YOLG'IZ SURROGAT yozilmasligi uchun.

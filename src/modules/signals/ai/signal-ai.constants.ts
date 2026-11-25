@@ -192,6 +192,34 @@ export const PRODUCIBLE_KINDS: readonly SignalKind[] = [
 ];
 
 /**
+ * TAKLIF UCHUN ENG KAM JIDDIYLIK.
+ *
+ * ⚠️ TAKLIF FAQAT `high` BO'LSA OLINADI — sozlama qarori
+ * (2026-11-25). Past va o'rta darajadagi taklif shtabga
+ * ko'rsatilmaydi: u "hal qilinishi kerak bo'lgan muammo" emas,
+ * balki fikr — va navbatni to'ldiradi.
+ *
+ * ⚠️ O'LCHANGAN: shu qoida kiritilgan paytda bazada 243 taklif
+ * bor edi — 23 past, 211 o'rta, 9 yuqori. Ya'ni qoida 234 tasini
+ * (96%) olib tashlaydi. Qolgan 9 tasi esa haqiqatan jiddiy
+ * ("isitish pechidan dudburonsiz foydalanish gazdan
+ * zaharlanishga va o'limga olib keladi", "shu zadvijkani
+ * ko'chirish kerak") — ya'ni toifa BO'SH QOLMAYDI va butunlay
+ * olib tashlash (`question` kabi) to'g'ri bo'lmasdi.
+ *
+ * ⚠️ `PRODUCIBLE_KINDS` DAN OLIB TASHLANMADI, ATAYLAB: taklif
+ * hali ishlab chiqariladi, faqat jiddiyligi bo'yicha filtrlanadi.
+ * Ro'yxatdan chiqarilsa, yuqoridagi 9 ta kabi xabarlar
+ * `complaint` bo'lib yoki umuman yo'qolib ketardi.
+ *
+ * ⚠️ IKKI JOYDA QO'LLANADI va ikkisi bir-birining o'rnini
+ * BOSMAYDI: promptda (model bekorga ishlamasligi uchun) va
+ * `normalizeSignal` da (ishonchli nuqta — `kind` tekshiruvidagi
+ * ayni mantiq, chunki sxema QIYMATNI majburlamaydi).
+ */
+export const SUGGESTION_MIN_SEVERITY: SignalSeverity = SignalSeverity.high;
+
+/**
  * TIZIM PROMPTI.
  *
  * ⚠️ MISOLLAR HAQIQIY HOLATLARDAN. Dastlabki variantda faqat umumiy
@@ -276,6 +304,17 @@ export const SYSTEM_PROMPT = [
   '- "complaint" — muammo, nosozlik, norozilik, javobsiz qolgan talab.',
   '- "suggestion" — ANIQ va amalga oshadigan taklif ("bekat shu yerga',
   '  qo\'yilsa"). Shunchaki istak ("hammasi yaxshi bo\'lsa edi") — EMAS.',
+  "",
+  // ⚠️ TAKLIF CHEGARASI — izoh `SUGGESTION_MIN_SEVERITY` da.
+  "  ⚠️ TAKLIFNI FAQAT JIDDIY bo'lsa qaytar: odamning sog'lig'i yoki",
+  "  xavfsizligiga, bolalarga yoki kommunal xavfga tegishli bo'lsa",
+  '  ("isitish pechi dudburonsiz — zaharlanish xavfi", "quduq qopqog\'i',
+  '  o\'rnatilsa"). Bunday taklifning "severity" si — "high".',
+  '  Oddiy, maishiy yoki qulaylik taklifini ("skameyka qo\'yilsa",',
+  '  "gullar ekilsa", "guruhga e\'lon tez tashlansa") UMUMAN QAYTARMA —',
+  "  u shtab ko'radigan navbatga tushmaydi.",
+  "  Shikoyatga bu chegara TEGISHLI EMAS: \"complaint\" har qanday",
+  "  jiddiylikda qaytariladi.",
   "",
   // ⚠️ AVVAL BU RO'YXAT UCH JOYGA BO'LINGAN EDI
   // (`E'TIBORGA OLINMAYDI`, `YANA UCHTA HOLAT`, `QOIDALAR`) va
