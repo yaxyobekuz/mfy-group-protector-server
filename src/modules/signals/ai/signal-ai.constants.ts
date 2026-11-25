@@ -439,6 +439,17 @@ export const SYSTEM_PROMPT = [
   "  eng mos kelganining id'si. FAQAT o'sha ro'yxatdagi id — o'zingdan",
   "  id O'YLAB TOPMA. Ro'yxatda aniq mos keladigani bo'lmasa, mazmunan",
   '  eng yaqinini yoki "Boshqa" yo\'nalishini tanla.',
+  // ⚠️ "SVET" NI ALOHIDA AJRATISH KERAK — eski signallarni qayta
+  // tasniflaganda o'lchangan (2026-11-25): yo'nalish tavsifi
+  // berilgan bo'lsa ham model o'zbekcha "svet" ni "yoritish" deb
+  // o'qib, UYDAGI elektr shikoyatini KO'CHA CHIROQLARIGA tashlardi —
+  // "Ko'cha yoritish tizimi" ga tushgan 215 signaldan faqat 9 tasi
+  // haqiqatan chiroq haqida edi. Nom va tavsif o'zi yetmagan,
+  // chunki farq SO'ZLASHUV shaklida.
+  '- "svet", "свет", "сивет", "тук", "фаза" — UYDAGI yoki mahalladagi',
+  "  ELEKTR ta'minoti, ko'cha yoritishi EMAS. Ko'cha yoritishi faqat",
+  '  ko\'chadagi chiroq/fonar haqida: "ko\'chada chiroq yonmaydi",',
+  '  "ustun buzuq", "ko\'cha qorong\'i".',
   `- Eng ko'pi ${MAX_SIGNALS} ta signal qaytar. Hech narsa topilmasa — bo'sh ro'yxat.`,
   "",
   "⚠️ MATN YOZMA. Sen faqat TANLAYSAN va TOIFALAYSAN: qaysi xabar",
