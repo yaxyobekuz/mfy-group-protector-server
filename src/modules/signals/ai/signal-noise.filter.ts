@@ -214,10 +214,48 @@ const RAW_OBJECT_PARTS: readonly string[] = [
   // Odam (xodim ustidan shikoyat)
   "rais", "раис", "xodim", "ходим", "ходими", "nozir", "нозир",
   "inspektor", "инспектор", "mirshab", "миршаб", "prorab", "прораб",
+  /**
+   * ⚠️ ALOQA — JAVOBSIZLIK SHIKOYATI UCHUN. Promptda "raisimiz
+   * telefonni ko'tarmaydi" OCHIQ signal deb sanalgan, lekin
+   * ro'yxatda telefon bo'lmagani uchun "Тел килсам олмадиз" va
+   * "телефони учик олмади" kabi xabarlar "aniq-narsa-yo'q" deb
+   * to'silardi — ya'ni kod promptning O'ZI signal deb atagan
+   * toifani qirqardi. Tirik audit izidan topildi (2026-11-25).
+   */
+  "telefon", "телефон", "qo'ngiroq", "qo'ng'iroq", "конгирок",
+  "қўнғироқ", "aloqa", "алока", "алоқа",
+  /**
+   * ⚠️ RUSCHA SHAKLLAR: guruhda ruscha so'z aralash ishlatiladi va
+   * "очередь" (navbat) kabi so'zlar o'zbekcha ro'yxatga tushmay
+   * qolardi.
+   */
+  "очередь", "ochered", "svetka", "света",
+  /**
+   * ⚠️ KENG TARQALGAN XATO YOZILISHLAR — tirik ma'lumotdan:
+   * "су" (сув), "совет"/"сивот" (свет), "тук" (ток). Bular
+   * qisqa, shuning uchun `OBJECT_WORDS` da CHEGARA bilan
+   * izlanadi, bu yerda emas.
+   */
+  "sovet", "совет", "сивот", "suw", "сувв",
 ];
 
 /** Qisqa, chegara bilan izlanadigan ob'ektlar. */
-const RAW_OBJECT_WORDS: readonly string[] = ["it", "ит", "tok", "ток", "gaz", "газ"];
+/**
+ * QISQA OB'EKTLAR — FAQAT CHEGARA BILAN.
+ *
+ * ⚠️ QISM SIFATIDA IZLASA BO'LMAYDI: "су" — "суд", "сумка",
+ * "сурат" ichida; "тел" — "телевизор", "телпак" ichida; "it" —
+ * "ketdi", "bitta" ichida. Chegara bilan esa ular yolg'iz so'z
+ * bo'lganda topiladi.
+ *
+ * ⚠️ "су" VA "тук" TIRIK AUDITDAN QO'SHILDI: "Ассолому алейкум су
+ * качон чикад" (= suv qachon chiqadi) HAQIQIY shikoyat edi va
+ * "сув" ro'yxatda bo'lsa ham "су" yo'qligi uchun to'silgan.
+ */
+const RAW_OBJECT_WORDS: readonly string[] = [
+  "it", "ит", "tok", "ток", "gaz", "газ",
+  "су", "su", "тук", "тел", "tel", "свт", "свет",
+];
 
 /**
  * HAL QILINGANI / JAVOBNING O'ZI.
@@ -386,12 +424,16 @@ export function fingerprint(rawText: string): string {
  * jimgina buzardi.
  */
 const RAW_TOPIC_FAMILIES: ReadonlyArray<readonly [string, readonly string[]]> = [
-  ["elektr", ["svet", "свет", "сивет", "сивэт", "elektr", "электр",
+  ["elektr", ["svet", "свет", "сивет", "сивэт", "сивот", "sovet",
+    "совет", "elektr", "электр",
     "chiroq", "чирок", "чироқ", "liniya", "линия", "lineya", "линя",
     "faza", "фаза", "tok", "ток", "transformator", "трансформатор",
     "fonar", "фонар", "yoritish", "ёритиш"]],
-  ["suv", ["suv", "сув", "nasos", "насос", "quvur", "кувур", "труба",
-    "isitish", "иситиш", "otopleniye", "отоплени"]],
+  // ⚠️ "су"/"su" MAVZU OILASIGA HAM: aks holda "су качон чикад"
+  // ob'ekt testidan o'tib, lekin mavzusi topilmay, har safar
+  // ALOHIDA signal bo'lardi (`topicKey` izohiga qara).
+  ["suv", ["suv", "сув", "су ", " су", "nasos", "насос", "quvur",
+    "кувур", "труба", "isitish", "иситиш", "otopleniye", "отоплени"]],
   ["gaz", ["gaz", "газ", "balon", "балон", "болон", "plita", "плита"]],
   ["axlat", ["axlat", "ахлат", "musor", "мусор", "musr", "муср",
     "мусир", "chiqindi", "чикинди", "чиқинди"]],
