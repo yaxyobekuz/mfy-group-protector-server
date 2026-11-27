@@ -152,7 +152,45 @@ async function bootstrap(): Promise<void> {
     logger: env.isProduction
       ? ["error", "warn", "log"]
       : ["error", "warn", "log", "debug", "verbose"],
+    /**
+     * ⚠️ O'Z TANA TAHLILCHIMIZ: standart tahlilchi `NestFactory`
+     * ichida ulanadi va uning chegarasini KEYIN o'zgartirib
+     * bo'lmaydi (`useBodyParser` faqat o'chirilgandan keyin
+     * ishlaydi).
+     */
+    bodyParser: false,
   });
+
+  /**
+   * JSON TANA CHEGARASI — 4 MB, STANDART 100 kb EMAS.
+   *
+   * ⚠️ TIRIK IMPORTDA TOPILGAN NUQSON (2026-11-26): chegara
+   * umuman qo'yilmagan edi, ya'ni Express'ning standart `100kb`
+   * si ishlardi va GEOMETRIYA IMPORTINING IKKALA YO'LI HAM
+   * ishlamasdi:
+   *
+   *   POST /territory/districts/geo   — 17 tuman ≈ 150 KB
+   *   POST /territory/mahallas/geo    — 100 MFY ≈ 150 KB
+   *
+   * Ikkinchisi ayniqsa chalg'ituvchi: `import-mahalla-geo.mjs`
+   * poligonlarni ATAYLAB 100 taligi bo'lib yuboradi ("server tanasi
+   * chegarasiga urilmasin" deb), lekin o'sha bo'lakning o'zi
+   * chegaradan katta chiqardi. Xato esa `500 Serverda kutilmagan
+   * xato` bo'lib ko'rinardi — ya'ni sababni (`PayloadTooLargeError`)
+   * faqat server logidan topish mumkin edi.
+   *
+   * ⚠️ 4 MB — BIR BO'LAKKA EMAS, ZAXIRA BILAN: eng katta haqiqiy
+   * tana ~150 KB. Chegara aynan o'sha songa qo'yilsa, chegara
+   * aniqroq bo'lgan MFY (yoki bo'lak hajmi oshirilgan) importda
+   * u yana urilardi.
+   *
+   * ⚠️ CHEKSIZ QILINMAYDI: tana xotiraga o'qiladi va chegarasiz
+   * bitta so'rov serverni yiqita olardi. FAYL yuklash bu yerdan
+   * O'TMAYDI — u `multer` orqali boradi (`uploads` moduli) va o'z
+   * chegarasi bor.
+   */
+  app.useBodyParser("json", { limit: "4mb" });
+  app.useBodyParser("urlencoded", { limit: "4mb", extended: true });
 
   // ⚠️ `crossOriginResourcePolicy` O'CHIRILADI: helmet standart holda
   // `same-origin` qo'yadi va u Mini App (boshqa domen/tunnel) yuklagan
