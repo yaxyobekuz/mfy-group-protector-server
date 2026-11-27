@@ -24,7 +24,8 @@
  * KAMIDA BIR NECHA BARAVAR yuqori qo'yilgan.
  */
 
-import type { ThrottlerModuleOptions } from "@nestjs/throttler";
+import { SetMetadata, applyDecorators } from "@nestjs/common";
+import { Throttle, type ThrottlerModuleOptions } from "@nestjs/throttler";
 
 /**
  * NOMLANGAN CHEGARALAR.
@@ -49,6 +50,42 @@ export const THROTTLE = {
   AI: "ai",
 } as const;
 
+export type ThrottleName = (typeof THROTTLE)[keyof typeof THROTTLE];
+
+/** Qaysi nomlangan chegara shu endpoint'ga ATAYLAB qo'yilgani. */
+export const RATE_LIMIT_KEY = "rateLimit";
+
+/**
+ * MAXSUS CHEGARA — FAQAT SHU ENDPOINT UCHUN.
+ *
+ * ⚠️ YALANG'OCH `@Throttle` O'RNIGA SHU ISHLATILADI va bu TIRIK
+ * NUQSONDAN keyin kiritildi (2026-11-26). `@nestjs/throttler`
+ * modulda e'lon qilingan HAMMA nomlangan chegarani HAR endpoint'ga
+ * qo'llaydi — dekorator esa faqat o'sha nomning QIYMATLARINI
+ * almashtiradi, boshqalarini o'chirmaydi.
+ *
+ * Natijada butun API eng qattiq chegara bilan — `ai` (daqiqada
+ * **8** ta) — cheklanib qolgan edi. Tirik o'lchov: 15 ta ketma-ket
+ * `GET /territory/districts` → 8 tasi o'tdi, 7 tasi `429`.
+ *
+ * ⚠️ VA BU JIM BUZILARDI: panel xodimi ro'yxat varaqlaganda
+ * "So'rovlar juda tez yuborildi" degan xabarni olardi va uni
+ * tarmoq nosozligi deb o'ylardi — chunki 300 lik "yumshoq global
+ * chegara" hujjatlashtirilgan, 8 lik haqiqiy chegara esa
+ * hech qayerda yozilmagan edi.
+ *
+ * ⚠️ MARKER METADATA KERAK: `AppThrottlerGuard` global'dan boshqa
+ * har chegarani SHU belgi bo'lmasa o'tkazib yuboradi. Ya'ni
+ * "qo'shilgan chegara" endi ATAYLAB tanlanadi.
+ *
+ * ⚠️ IKKISI BITTA DEKORATORDA: `@Throttle` ni alohida qo'yish
+ * mumkin edi, lekin o'shanda belgi va chegara AJRALIB ketardi —
+ * biri qo'yilib, ikkinchisi unutilsa, chegara jimgina ishlamay
+ * qolardi.
+ */
+export const RateLimit = (name: ThrottleName) =>
+  applyDecorators(Throttle({ [name]: {} }), SetMetadata(RATE_LIMIT_KEY, name));
+
 /**
  * GLOBAL SOZLAMA (`app.module.ts`).
  *
@@ -61,6 +98,11 @@ export const THROTTLE = {
  * bosmaydi): `auth` endpoint'iga so'rov ikkisidan HAM o'tishi kerak.
  * Shuning uchun maxsus chegara global'dan HAR DOIM qattiqroq
  * bo'ladi — aks holda u ma'nosiz bo'lardi.
+ *
+ * ⚠️ LEKIN FAQAT `@RateLimit` QO'YILGAN ENDPOINT'GA (yuqoridagi
+ * izoh): kutubxona o'zi hammasini hamma joyga qo'llaydi va
+ * `AppThrottlerGuard` buni to'g'rilaydi. Bu qator bo'lmasa,
+ * "global 300" degan va'da yolg'on bo'lardi — haqiqiy chegara 8.
  */
 export const THROTTLER_CONFIG: ThrottlerModuleOptions = {
   throttlers: [

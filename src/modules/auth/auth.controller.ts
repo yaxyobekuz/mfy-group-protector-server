@@ -10,7 +10,6 @@
  */
 
 import { Body, Controller, Headers, HttpCode, Post, Get } from "@nestjs/common";
-import { Throttle } from "@nestjs/throttler";
 
 import {
   ClientIp,
@@ -18,7 +17,7 @@ import {
   Public,
   type RequestUser,
 } from "../../common/decorators";
-import { THROTTLE } from "../../common/throttle";
+import { RateLimit, THROTTLE } from "../../common/throttle";
 import { AuthService } from "./auth.service";
 import { LoginDto, RefreshDto } from "./dto/auth.dto";
 
@@ -37,7 +36,7 @@ export class AuthController {
    * ⚠️ IP BO'YICHA (`throttler.guard.ts`): kirish paytida token yo'q.
    */
   @Public()
-  @Throttle({ [THROTTLE.AUTH]: {} })
+  @RateLimit(THROTTLE.AUTH)
   @Post("login")
   @HttpCode(200)
   login(
@@ -51,7 +50,7 @@ export class AuthController {
   // ⚠️ `refresh` HAM CHEGARALANADI: u ham tokensiz kiradigan yo'l va
   // refresh tokenni taxmin qilishga urinish mumkin bo'lardi.
   @Public()
-  @Throttle({ [THROTTLE.AUTH]: {} })
+  @RateLimit(THROTTLE.AUTH)
   @Post("refresh")
   @HttpCode(200)
   refresh(

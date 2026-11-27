@@ -30,10 +30,11 @@
  */
 
 import { Injectable, type ExecutionContext } from "@nestjs/common";
-import { ThrottlerGuard } from "@nestjs/throttler";
+import { ThrottlerGuard, type ThrottlerRequest } from "@nestjs/throttler";
 import type { Request } from "express";
 
 import { BOT_ONLY_KEY, type RequestCitizen, type RequestUser } from "../decorators";
+import { RATE_LIMIT_KEY, THROTTLE } from "../throttle";
 
 @Injectable()
 export class AppThrottlerGuard extends ThrottlerGuard {
@@ -62,6 +63,43 @@ export class AppThrottlerGuard extends ThrottlerGuard {
     if (isBot) return true;
 
     return super.shouldSkip(context);
+  }
+
+  /**
+   * NOMLANGAN CHEGARA — FAQAT O'ZI SO'RALGAN ENDPOINT'DA.
+   *
+   * ⚠️ KUTUBXONA MODULDA E'LON QILINGAN HAMMA CHEGARANI HAR
+   * ENDPOINT'GA QO'LLAYDI (`ThrottlerGuard` ularni navbat bilan
+   * tekshiradi), `@Throttle` esa faqat o'sha nomning qiymatlarini
+   * almashtiradi — boshqalarini O'CHIRMAYDI.
+   *
+   * Natijada butun API eng qattiq chegara bilan cheklanib
+   * qolgan edi: `ai` — daqiqada **8** ta so'rov. Tirik o'lchovda
+   * 15 ta ketma-ket `GET /territory/districts` dan 7 tasi `429`
+   * qaytargan, ya'ni panelning oddiy ishi ham buzilardi.
+   *
+   * ⚠️ `global` HAMMAGA QOLADI: u aynan shu maqsadda —
+   * "hamma endpoint uchun yumshoq chegara" (`throttle.ts`).
+   * Faqat maxsus chegaralar `@RateLimit` bilan TANLANADI.
+   *
+   * ⚠️ `true` — "O'TKAZIB YUBOR": ota-sinfda `handleRequest`
+   * ruxsat berilganda `true` qaytaradi, chegara oshganda esa
+   * istisno tashlaydi.
+   */
+  protected async handleRequest(requestProps: ThrottlerRequest): Promise<boolean> {
+    const { context, throttler } = requestProps;
+    const name = throttler.name;
+
+    if (name && name !== THROTTLE.GLOBAL) {
+      const requested = this.reflector.getAllAndOverride<string | undefined>(
+        RATE_LIMIT_KEY,
+        [context.getHandler(), context.getClass()],
+      );
+
+      if (requested !== name) return true;
+    }
+
+    return super.handleRequest(requestProps);
   }
 
   /**

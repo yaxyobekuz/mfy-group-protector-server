@@ -24,7 +24,6 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { Throttle } from "@nestjs/throttler";
 
 import {
   CitizenOnly,
@@ -33,7 +32,7 @@ import {
   Public,
   type RequestCitizen,
 } from "../../common/decorators";
-import { THROTTLE } from "../../common/throttle";
+import { RateLimit, THROTTLE } from "../../common/throttle";
 import { MAX_FILE_SIZE } from "../uploads/uploads.constants";
 import { MobileAuthService } from "./mobile-auth.service";
 import { MobileService } from "./mobile.service";
@@ -67,7 +66,7 @@ export class MobileController {
    * "token olishga urinish". Qiymat `common/throttle.ts` da.
    */
   @Public()
-  @Throttle({ [THROTTLE.AUTH]: {} })
+  @RateLimit(THROTTLE.AUTH)
   @Post("auth/telegram")
   @HttpCode(200)
   authTelegram(@Body() dto: TelegramAuthDto) {
@@ -83,7 +82,7 @@ export class MobileController {
    * yagona kirish yo'liga ega.
    */
   @Public()
-  @Throttle({ [THROTTLE.AUTH]: {} })
+  @RateLimit(THROTTLE.AUTH)
   @Post("auth/google")
   @HttpCode(200)
   authGoogle(@Body() dto: GoogleAuthDto) {
@@ -99,7 +98,7 @@ export class MobileController {
    * mavjud kirish yo'liga ega, ikkisi bir-biriga zaxira emas.
    */
   @Public()
-  @Throttle({ [THROTTLE.AUTH]: {} })
+  @RateLimit(THROTTLE.AUTH)
   @Post("auth/apple")
   @HttpCode(200)
   authApple(@Body() dto: AppleAuthDto) {
@@ -111,7 +110,7 @@ export class MobileController {
   }
 
   @Public()
-  @Throttle({ [THROTTLE.AUTH]: {} })
+  @RateLimit(THROTTLE.AUTH)
   @Post("auth/dev")
   @HttpCode(200)
   authDev(@Body() dto: DevAuthDto) {
@@ -204,7 +203,7 @@ export class MobileController {
    * bloklamasligi uchun.
    */
   @CitizenOnly()
-  @Throttle({ [THROTTLE.AI]: {} })
+  @RateLimit(THROTTLE.AI)
   @Post("appeals/analyze")
   @HttpCode(200)
   analyze(@Body() dto: AnalyzeDto) {
@@ -224,7 +223,7 @@ export class MobileController {
    * birga ishlaydi.
    */
   @CitizenOnly()
-  @Throttle({ [THROTTLE.APPEAL]: {} })
+  @RateLimit(THROTTLE.APPEAL)
   @Post("appeals")
   create(@CurrentCitizen() citizen: RequestCitizen, @Body() dto: CreateAppealDto) {
     return this.mobile.create(citizen, dto);
@@ -248,7 +247,7 @@ export class MobileController {
    * cheksiz so'rov baribir diskni yeb qo'yardi.
    */
   @CitizenOnly()
-  @Throttle({ [THROTTLE.UPLOAD]: {} })
+  @RateLimit(THROTTLE.UPLOAD)
   @Post("uploads")
   @UseInterceptors(
     FileInterceptor("file", {
