@@ -29,9 +29,12 @@ import {
   BotAdminDto,
   BotAudienceQueryDto,
   BotBroadcastDto,
+  BotBroadcastIdDto,
   BotBroadcastListDto,
   CreateBroadcastDto,
   ListBroadcastsQuery,
+  ListRecipientsQuery,
+  PreviewBroadcastDto,
 } from "./dto/broadcasts.dto";
 
 @Controller("broadcasts")
@@ -54,11 +57,26 @@ export class BroadcastsController {
   @Post("preview")
   @HttpCode(200)
   @RequirePermissions("broadcast.send")
-  preview(
-    @Body() dto: CreateBroadcastDto,
-    @CurrentUser() user: RequestUser,
-  ) {
+  preview(@Body() dto: PreviewBroadcastDto, @CurrentUser() user: RequestUser) {
     return this.broadcasts.preview(dto, toScope(user));
+  }
+
+  /**
+   * SINOV XABARI — FAQAT YUBORUVCHIGA.
+   *
+   * ⚠️ `@Post("test")` `@Post(":id/...")` DAN OLDIN TURISHI SHART:
+   * NestJS yo'llarni E'LON TARTIBIDA solishtiradi va pastda qolsa,
+   * "test" so'zi `id` bo'lib o'qilardi (`export/unassigned-groups`
+   * dagi ayni tuzoq).
+   *
+   * ⚠️ YOZUV YARATILMAYDI: sinov — tarqatma emas va u tarixga
+   * tushsa, "nechta tarqatma yuborildi" degan son buzilardi.
+   */
+  @Post("test")
+  @HttpCode(200)
+  @RequirePermissions("broadcast.send")
+  test(@Body() dto: CreateBroadcastDto, @CurrentUser() user: RequestUser) {
+    return this.broadcasts.testSend(dto, user.id);
   }
 
   @Post()
@@ -75,6 +93,50 @@ export class BroadcastsController {
   @RequirePermissions("broadcast.send")
   findOne(@Param("id") id: string, @CurrentUser() user: RequestUser) {
     return this.broadcasts.findOne(id, toScope(user));
+  }
+
+  /**
+   * YETKAZISH JURNALI.
+   *
+   * ⚠️ AYNI RUXSAT (`broadcast.send`): jurnalda chat id'lari va
+   * nomlari bor, ya'ni u tarqatma yuborgan odamning o'z ishi —
+   * alohida ruxsat qo'shilsa, u hech kimga berilmay, funksiya
+   * o'lik qolardi.
+   */
+  @Get(":id/recipients")
+  @RequirePermissions("broadcast.send")
+  recipients(
+    @Param("id") id: string,
+    @CurrentUser() user: RequestUser,
+    @Query() query: ListRecipientsQuery,
+  ) {
+    return this.broadcasts.recipients(id, toScope(user), query);
+  }
+
+  /**
+   * TO'XTATADI.
+   *
+   * ⚠️ YUBORILGANLARNI QAYTARIB BO'LMAYDI: to'xtatish faqat
+   * QOLGANLARINI to'xtatadi va panel buni ochiq aytadi.
+   */
+  @Post(":id/cancel")
+  @HttpCode(200)
+  @RequirePermissions("broadcast.send")
+  cancel(@Param("id") id: string, @CurrentUser() user: RequestUser) {
+    return this.broadcasts.cancel(id, toScope(user));
+  }
+
+  /**
+   * YETIB BORMAGANLARIGA QAYTA YUBORADI.
+   *
+   * ⚠️ YANGI TARQATMA YARATILADI: eskisi append-only dalil va
+   * uning sonlarini o'zgartirish yozuvni soxtalashtirardi.
+   */
+  @Post(":id/retry")
+  @HttpCode(200)
+  @RequirePermissions("broadcast.send")
+  retry(@Param("id") id: string, @CurrentUser() user: RequestUser) {
+    return this.broadcasts.retry(id, toScope(user));
   }
 }
 
@@ -137,6 +199,7 @@ export class BotAdminController {
         audience: dto.audience,
         districtId: dto.districtId,
         mahallaId: dto.mahallaId,
+        activeDays: dto.activeDays,
       },
       admin.scope,
     );
@@ -147,19 +210,20 @@ export class BotAdminController {
   async create(@Body() dto: BotBroadcastDto) {
     const admin = await this.admins.resolve(dto.telegramId);
 
-    return this.broadcasts.create(
-      {
-        audience: dto.audience,
-        mode: dto.mode,
-        message: dto.message,
-        fromChatId: dto.fromChatId,
-        sourceMessageId: dto.sourceMessageId,
-        districtId: dto.districtId,
-        mahallaId: dto.mahallaId,
-      },
-      admin.scope,
-      "bot",
-    );
+    /*
+     * ⚠️ MAYDONLAR SANAB O'TILMAYDI: avval ular qo'lda
+     * ko'chirilardi va tarqatmaga yangi imkoniyat (tugma, ovozsiz,
+     * rejalashtirish) qo'shilganda botdan kelgani JIMGINA tushib
+     * qolardi — bot "tugma qo'ydim" deb o'ylab, xabar tugmasiz
+     * ketardi.
+     *
+     * ⚠️ `telegramId` CHIQARIB TASHLANADI: u faqat adminni topish
+     * uchun edi (`resolve`) va tarqatma yozuviga tushishi kerak
+     * emas — kim yuborgani `createdBy` da, xodim id'si bilan.
+     */
+    const { telegramId: _admin, ...content } = dto;
+
+    return this.broadcasts.create(content, admin.scope, "bot");
   }
 
   @BotOnly()
@@ -180,6 +244,19 @@ export class BotAdminController {
    * ko'rsatish uchun so'raydi. Tarqatma fon'da ketadi, ya'ni darhol
    * javob bo'lmaydi.
    */
+  /**
+   * ⚠️ `broadcasts/cancel` `broadcasts/:id` DAN OLDIN: NestJS
+   * yo'llarni e'lon tartibida solishtiradi va pastda qolsa,
+   * "cancel" so'zi `id` bo'lib o'qilardi.
+   */
+  @BotOnly()
+  @Post("broadcasts/cancel")
+  @HttpCode(200)
+  async cancel(@Body() dto: BotBroadcastIdDto) {
+    const admin = await this.admins.resolve(dto.telegramId);
+    return this.broadcasts.cancel(dto.broadcastId, admin.scope);
+  }
+
   @BotOnly()
   @Post("broadcasts/:id")
   @HttpCode(200)

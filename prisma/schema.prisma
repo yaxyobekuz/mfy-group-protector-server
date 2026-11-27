@@ -1540,10 +1540,27 @@ model MahallaAssignee {
 /// GURUHLARI. Ikkisi butunlay boshqa auditoriya va ularni bitta
 /// qiymatga birlashtirish "e'lonni guruhga yubordim, lekin odamlar
 /// ko'rmadi" degan holatni yashirardi.
+/// ⚠️ `channels` GURUHDAN AJRATILDI: kanalda e'lon YUZLAB odamga
+/// bir xabar bilan yetadi va uni o'chirib bo'lmaydi, guruhda esa
+/// yozishma ichida yo'qoladi. Bitta `groups` qiymatida qolsa,
+/// operator "guruhlarga yubordim" deb o'ylab, aslida rasmiy
+/// kanallarga ham tarqatgan bo'lardi.
+///
+/// ⚠️ `chats` — ANIQ KO'RSATILGAN CHATLAR: qayta yuborishda
+/// (`retry`) faqat YETIB BORMAGANLARIGA kerak va usiz butun
+/// auditoriyaga ikkinchi marta xabar ketardi.
+///
+/// ⚠️ `citizens_active` — OXIRGI N KUNDA FAOL BO'LGANLAR: botni
+/// bir marta ochib tashlab ketgan odam ro'yxatda abadiy qoladi va
+/// unga yuborilgan xabar deyarli har doim `403` beradi.
 enum BroadcastAudience {
   citizens
+  citizens_active
   groups
+  channels
+  chats
   both
+  all
 }
 
 /// Xabar QANDAY ketadi.
@@ -1562,14 +1579,96 @@ enum BroadcastMode {
   copy
 }
 
+/// YETKAZISH JURNALI — HAR MANZIL UCHUN BITTA QATOR.
+///
+/// ⚠️ NIMA UCHUN KERAK: yig'ma son ("1 200 yuborildi, 80
+/// yuborilmadi") bilan HECH NARSA qilib bo'lmasdi — qaysi mahalla
+/// guruhiga yetib bormagani, NEGA yetib bormagani va kimga QAYTA
+/// yuborish kerakligi bilinmasdi.
+///
+/// ⚠️ QAYTA YUBORISH SHUNDAN QURILADI: `retry` faqat `failed`
+/// bo'lgan manzillarni oladi — butun auditoriyaga ikkinchi marta
+/// xabar KETMAYDI.
+///
+/// ⚠️ APPEND-ONLY: yuborilgan xabar — dalil, uni keyin
+/// tahrirlash jurnalning ma'nosini yo'qotardi (`AuditLog` va
+/// `SecurityEvent` bilan ayni doktrina).
+model BroadcastRecipient {
+  id String @id @default(cuid())
+
+  broadcastId String @map("broadcast_id")
+
+  chatId String @map("chat_id")
+
+  /// Manzil TURI — nosozlikni sharhlash uchun.
+  ///
+  /// ⚠️ GURUHGA YETMAGANI VA ODAMGA YETMAGANI BOSHQA-BOSHQA
+  /// narsa: odam botni bloklashi NORMAL, guruhdan bot chiqarib
+  /// yuborilgani esa REYESTR xatosi va uni tuzatish kerak.
+  kind BroadcastTargetKind
+
+  status BroadcastDelivery
+
+  /// Telegram tushuntirishi — "nega yetmadi" degan savolga javob.
+  error String?
+
+  /// Qaysi MFY yoki guruh ekani — NUSXA.
+  ///
+  /// ⚠️ JONLI HAVOLA EMAS: guruh reyestrdan o'chirilsa ham
+  /// jurnalda "kimga yuborilgani" qolishi kerak.
+  title String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  broadcast Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@index([broadcastId, status])
+  @@map("broadcast_recipients")
+}
+
+/// Manzil turi — jurnalda va sanoqda.
+enum BroadcastTargetKind {
+  citizen
+  group
+  channel
+}
+
+/// Yetkazish natijasi.
+///
+/// ⚠️ `blocked` ALOHIDA: bu NOSOZLIK EMAS — odam botni
+/// bloklagan va bu bilan hech narsa qilib bo'lmaydi.
+enum BroadcastDelivery {
+  sent
+  failed
+  blocked
+}
+
+/// Matn qanday o'qiladi.
+///
+/// ⚠️ `plain` — STANDART: belgilar EKRANLANADI va matn
+/// qanday yozilgan bo'lsa shunday ko'rinadi. `html` da esa bitta
+/// yopilmagan teg butun xabarni rad ettirardi.
+enum BroadcastParseMode {
+  plain
+  html
+}
+
 /// ⚠️ `pending → sending → done/failed`. Oraliq holat KERAK: tarqatma
 /// minglab xabar bo'lishi mumkin va u FON'DA ketadi — HTTP so'rovi
 /// uni kutib turolmaydi (timeout). Panel holatni so'rab turadi.
+/// ⚠️ `scheduled` VA `cancelled` ALOHIDA HOLAT: "kutayapti" va
+/// "bekor qilindi" `pending`/`failed` ga sig'maydi — rejalashtirilgan
+/// tarqatma hali XATO EMAS, bekor qilingani esa NOSOZLIK emas.
+/// Bitta qiymatga tiqilsa, panelda ularni ajratib bo'lmasdi va
+/// "nega yuborilmadi" degan savol javobsiz qolardi.
 enum BroadcastStatus {
+  draft
+  scheduled
   pending
   sending
   done
   failed
+  cancelled
 }
 
 /// TARQATMA YOZUVI — DALIL VA HOLAT.
@@ -1610,6 +1709,56 @@ model Broadcast {
   districtId String? @map("district_id")
   mahallaId  String? @map("mahalla_id")
 
+  /// Panel ro'yxatidagi nom — matnning birinchi qatori emas.
+  ///
+  /// ⚠️ IXTIYORIY: majburiy qilinsa, shoshilinch e'lon
+  /// yuborayotgan xodim uni o'ylab o'tirardi. Bo'sh bo'lsa panel
+  /// matndan qisqa sarlavha yasaydi.
+  title String?
+
+  /// ⚠️ `plain` STANDART: matn panelda yoziladi va undagi `<`,
+  /// `&` belgilari HTML sifatida o'qilsa, Telegram BUTUN xabarni
+  /// rad etardi ("can't parse entities") — ya'ni bitta qavs butun
+  /// tarqatmani to'xtatardi. `html` faqat ATAYLAB tanlanadi.
+  parseMode BroadcastParseMode @default(plain) @map("parse_mode")
+
+  /// ⚠️ STANDART HOLDA O'CHIQ: havola ko'rinishi xabarni ikki
+  /// barobar uzaytiradi va e'lon matni ekrandan chiqib ketardi.
+  disablePreview Boolean @default(true) @map("disable_preview")
+
+  /// ⚠️ TUNGI TARQATMA UCHUN: ovozsiz xabar odamni uyg'otmaydi.
+  /// Guruhda bu ayniqsa muhim — u yerda yuzlab odam bor.
+  silent Boolean @default(false)
+
+  /// ⚠️ FAQAT GURUH VA KANALGA: shaxsiy chatda qadash ma'nosiz
+  /// va Telegram uni rad etadi.
+  pinMessage Boolean @default(false) @map("pin_message")
+
+  /// Inline tugmalar — `[{ text, url }]`.
+  ///
+  /// ⚠️ FAQAT HAVOLALI TUGMA: `callback_data` tugmasi
+  /// bosilganda botga hodisa keladi va uni ishlovchi kod KERAK
+  /// bo'lardi — aks holda tugma bosiladi-yu, hech narsa bo'lmaydi.
+  buttons Json?
+
+  /// ⚠️ `setTimeout` EMAS, BAZADA (e'lonlardagi ayni sabab):
+  /// server qayta ishga tushganda xotiradagi taymer YO'QOLADI va
+  /// "ertalab 9 da" qo'yilgan tarqatma umuman chiqmasdi.
+  scheduledAt DateTime? @map("scheduled_at")
+
+  /// ⚠️ BEKOR QILISH VAQTI YOZILADI, STATUS YETMAYDI: yuborish
+  /// sikli har 25 manzilda SHU maydonni o'qiydi va to'xtaydi.
+  cancelledAt DateTime? @map("cancelled_at")
+
+  /// Aniq ko'rsatilgan manzillar — `audience = chats` uchun.
+  ///
+  /// ⚠️ QAYTA YUBORISH SHUNSIZ ISHLAMASDI: "faqat yetib
+  /// bormaganlariga" degani aynan shu ro'yxat.
+  chatIds String[] @map("chat_ids")
+
+  /// `citizens_active` uchun — necha kun ichida faol bo'lganlar.
+  activeDays Int? @map("active_days")
+
   status BroadcastStatus @default(pending)
 
   /// ⚠️ UCHTA SON: `total` — topilgan manzil, `sent` — yetib borgani,
@@ -1618,6 +1767,15 @@ model Broadcast {
   total  Int @default(0)
   sent   Int @default(0)
   failed Int @default(0)
+
+  /// BOTNI BLOKLAGANLAR — `failed` DAN ALOHIDA.
+  ///
+  /// ⚠️ IKKISI BIR XIL EMAS: "bot bloklangan" (403) — NORMAL
+  /// hol va u bilan hech narsa qilib bo'lmaydi; tarmoq xatosi esa
+  /// QAYTA YUBORISHNI talab qiladi. Bitta songa qo'shilsa, operator
+  /// har tarqatmadan keyin "500 ta xato" degan qo'rqinchli raqamni
+  /// ko'rib, sababini izlab yurardi.
+  blocked Int @default(0)
 
   /// Butun tarqatma yiqilgan bo'lsa — sabab.
   error String?
@@ -1637,8 +1795,14 @@ model Broadcast {
   district District? @relation(fields: [districtId], references: [id], onDelete: SetNull)
   mahalla  Mahalla?  @relation(fields: [mahallaId], references: [id], onDelete: SetNull)
 
+  recipients BroadcastRecipient[]
+
   @@index([createdAt(sort: Desc)])
   @@index([status])
+  /// ⚠️ REJALASHTIRILGANLARNI TOPISH UCHUN: job har daqiqada
+  /// "vaqti kelganlarini" so'raydi va indekssiz u butun jadvalni
+  /// aylanib chiqardi.
+  @@index([status, scheduledAt])
   @@map("broadcasts")
 }
 

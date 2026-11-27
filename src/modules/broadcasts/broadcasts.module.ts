@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 
 import { BotAdminService } from "./bot-admin.service";
 import { BotAdminController, BroadcastsController } from "./broadcasts.controller";
+import { BroadcastsJob } from "./broadcasts.job";
 import { BroadcastsService } from "./broadcasts.service";
 
 /**
@@ -17,7 +18,7 @@ import { BroadcastsService } from "./broadcasts.service";
  */
 @Module({
   controllers: [BroadcastsController, BotAdminController],
-  providers: [BroadcastsService, BotAdminService],
+  providers: [BroadcastsService, BotAdminService, BroadcastsJob],
   exports: [BroadcastsService],
 })
 export class BroadcastsModule {}
